@@ -21,14 +21,14 @@ thicc_border<-fp_border(color = "black", style = "solid", width = 2)
 # Figure 1
 ```{r sampledatadist, fig.height=6, fig.width=8, fig.cap="Longitudinal fecal samples collected for (A) female and (B) male baboons in the Amboseli ecosystem. Host age at the time of sample collection is indicated on the x-axis and individual baboons are represented on the y-axis. Each point represents a fecal sample collected from an individual baboon. The fill color of each point reflects the subject's sexual maturation state, with lighter colors reflecting samples collected prior to menarche for females and prior to testicular enlargement for males (for more information on how these milestones are measured, see Table S5.8. Plot A contains 8,245 samples from 234 individual females. Plot B contains 5,231 samples from 197 individual males."}
 #metadata file with all the EMP samples and ages
-metadata_random<-readRDS("../../4_machinelearning/out/metadata_random.rds") %>% 
+metadata_random<-readRDS("../data/metadata_random.rds") %>% 
   mutate(age_matured=as.numeric((matured-birth)/365.25)) %>% 
   filter(collect_grp<3) %>% 
   select(DADA_id,sname,age_matured, statdate, status,birth) %>% 
   mutate(age_end = statdate-birth) 
 
 #file with just the data that actually went into my model (too lazy to do all the filtering to the above table so I just join to this table)
-H.PredLife<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+H.PredLife<-readRDS("../data/H.PredictedAgeData.rds")
 
 #table where I count the # of samples per individual since I sort by that to make it look less jumbled
 count<-H.PredLife %>% 
@@ -105,12 +105,12 @@ males<-ggplot(H.PredLife[H.PredLife$sex=="M",], aes(x=reorder(sname,-sample_coun
 #make them into a single figure and save
 grid.arrange(females, males, ncol=2)
 sampledis<-grid.arrange(females, males, ncol=2)
-ggsave(plot = sampledis, filename = "../out/Figures/SampleDistribution.png")
+#ggsave(plot = sampledis, filename = "../out/Figures/SampleDistribution.png")
 ```
 
 # Fig 2
 ```{r fig.height=8,fig.width=16}
-relab_phylum_long<-readRDS("../../1_data/out/relabundance_long_phyla_nochl.rds") %>% 
+relab_phylum_long<-readRDS("../data/relabundance_long_phyla_nochl.rds") %>% 
   filter(!grepl("Chloroplast",taxa_phyla)) %>% 
   filter(taxa_phyla!="Bacteria_Cyanobacteria") %>% 
   group_by(sample_ID) %>% 
@@ -120,7 +120,7 @@ relab_phylum_long<-readRDS("../../1_data/out/relabundance_long_phyla_nochl.rds")
   mutate(taxa_phyla=gsub(pattern = "_",replacement = "/",taxa_phyla))
 
 #bring in the metadata
-metadata_random<-readRDS("../../4_machinelearning/out/metadata_random.rds") %>% 
+metadata_random<-readRDS("../data/metadata_random.rds") %>% 
   mutate(age_matured=as.numeric((matured-birth)/365.25)) %>% 
   filter(collect_grp<3) %>% 
   select(DADA_id,sname,age.years, statdate, status,birth,sex) %>% 
@@ -159,7 +159,7 @@ p2a_relabunF<-relab_phylum_long2 %>%
         plot.tag=element_text(size=44),
         plot.title=element_text(size=42),
         legend.position = "none");p2a_relabunF
-ggsave(plot=p2a_relabunF, filename = "../out/Figures/RelAbunPhylumF.png",width = 16, height=8, units="in",dpi=300)
+#ggsave(plot=p2a_relabunF, filename = "../out/Figures/RelAbunPhylumF.png",width = 16, height=8, units="in",dpi=300)
 ```
 ```{r fig.height=8,fig.width=18}
 #males
@@ -180,23 +180,23 @@ p2b_relabunM<-relab_phylum_long2 %>%
         plot.title=element_text(size=42),
         legend.position = "right",
         legend.key.width=unit(1,"cm"));p2b_relabunM
-ggsave(plot=p2b_relabunM, filename = "../out/Figures/RelAbunPhylumM.png",width = 18, height=8, units="in",dpi=300)
+#ggsave(plot=p2b_relabunM, filename = "../out/Figures/RelAbunPhylumM.png",width = 18, height=8, units="in",dpi=300)
 ```
 ``````{r fig.height=10,fig.width=35}
 library(ggpubr)
 ggarrange(p2A, p2B, ncol=2, nrow=1)   
-ggsave("../out/Figures/2AB_RelAbunPhylum.png")
+#ggsave("../out/Figures/2AB_RelAbunPhylum.png")
 ###
 ```
 
 ```{r fig.height=6,fig.width=15}
-age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_meancentered_May21.rds")
-#age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_inclASVs25to50.rds")
+age_gaussian_quad<-readRDS("../data/FeatureAnalysis_LMM_L1O_gaussian_quad_meancentered_May21.rds")
+
 colnames(age_gaussian_quad)<-gsub("_A","_linear",colnames(age_gaussian_quad));
 colnames(age_gaussian_quad)<-gsub("_B","_quad",colnames(age_gaussian_quad));
 colnames(age_gaussian_quad)<-gsub("Term","Age",colnames(age_gaussian_quad));
 
-gaussian_features<-as.data.frame(readRDS("../../4_machinelearning/out/phenotype_types.rds")) %>% 
+gaussian_features<-as.data.frame(readRDS("../data/phenotype_types.rds")) %>% 
   mutate(Feature=as.character(phenotype_names)) %>% select(-phenotype_names)
 gaussian_features2<-gaussian_features
 gaussian_features2[gaussian_features2=="ASV"]<-"Gaussian ASV"
@@ -242,7 +242,7 @@ GausSigLinear<-GausSigFeatures %>%
   slice(1:25,nrow(GausSigFeatures):(nrow(GausSigFeatures)-24)) %>% #removed for rds output below
   select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj)
 
-silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+silva<-readRDS("../data/ASVs_silva_assigned_extendedMay21.rds") %>% 
   select(ASV,ASV_id,starts_with("taxa_")) %>% 
   rename(Feature=ASV)
 
@@ -317,7 +317,7 @@ p2C_communityestimates <- ggplot(communitymetrics, aes(x=rev(no), y=Estimate_lin
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank())+
   coord_flip()+labs(tag="C");p2C_communityestimates
-ggsave(plot=p2C_communityestimates,filename = "../out/Figures/2C_CommunityEstimates.png",height=6,width=15,dpi=300,units="in")
+#ggsave(plot=p2C_communityestimates,filename = "../out/Figures/2C_CommunityEstimates.png",height=6,width=15,dpi=300,units="in")
 ```
 ```{r fig.height=21,fig.width=18}
 
@@ -337,7 +337,7 @@ p2E_gausestimates <- ggplot(taxametrics, aes(x=rev(no), y=Estimate_linear)) +
         plot.tag=element_text(size=44),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank()); p2E_gausestimates
-ggsave(plot=p2E_gausestimates,filename = "../out/Figures/2E_Gaussian50Estimates.png", height=21,width=18,units="in", dpi=300)
+#ggsave(plot=p2E_gausestimates,filename = "../out/Figures/2E_Gaussian50Estimates.png", height=21,width=18,units="in", dpi=300)
 
 #{r FigGaussian50Estimates,fig.height=10.5,fig.width=8,fig.cap="Linear associations between mean-centered age and community metrics or the 50 taxa whose abundances exhibited the strongest effect sizes. Plot shows the 50 largest linear estimates for taxa that had significant associations with age. Points are colored by category of feature, and category of feature is also indicated in parentheses, where D is for diversity metrics, C for position, P for phylum, F for family, G for genus, and ASV for ASV. Features that also had a significant quadratic age term are indicated by a *."}
 #ggdraw() +
@@ -347,12 +347,12 @@ ggsave(plot=p2E_gausestimates,filename = "../out/Figures/2E_Gaussian50Estimates.
 ```
 
 ```{r fig.height=12,fig.width=22}
-ordination<-readRDS("../../2_beta/out/ordination_data_bstatus0.rds") %>% 
+ordination<-readRDS("../data/ordination_data_bstatus0.rds") %>% 
   select(DADA_id, starts_with("PC")) %>% 
   select(-c(PC3,PC9,PC10))
 colnames(ordination)<-c("DADA_id",paste("PC ",seq(1:2),"*",sep=""),paste("PC ",4:8,"*",sep=""))
 
-cow_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+cow_metadata<-readRDS("../data/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
   rename(age_chrono=age.years) %>%
   select(DADA_id,age_chrono,ShannonH,Simpson,Hill.q1,Hill.q2) %>% 
   rename("Hill No. 1*"=Hill.q1,
@@ -396,11 +396,11 @@ p2D_communityage<-ggplot(data=most,
         panel.grid.minor = element_blank())+
   labs(x="Age (years)",
        y="Average Value");p2D_communityage
-ggsave(plot=p2D_communityage, filename = "../out/Figures/2D_CommunityMetricsAge.png",height=12,width=22,units="in",dpi=300)
+#ggsave(plot=p2D_communityage, filename = "../out/Figures/2D_CommunityMetricsAge.png",height=12,width=22,units="in",dpi=300)
 ```
 
 ```{r fig.height=20,fig.width=22}
-silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+silva<-readRDS("../data/ASVs_silva_assigned_extendedMay21.rds") %>% 
   select(ASV,ASV_id,starts_with("taxa_")) %>% 
   rename(Feature=ASV)
 silva2<-silva %>% select(Feature,ASV_id)
@@ -410,12 +410,12 @@ top50features<-metricsgauss_linear %>%
   arrange(Estimate_linear) 
 
 top50features_list<-top50features$Feature
-phenotypes_readcount_raw<-readRDS('../../4_machinelearning/out/phenotypes_readcounts_no_chl_mt.rds')
+phenotypes_readcount_raw<-readRDS('../data/phenotypes_readcounts_no_chl_mt.rds')
 phenotypes_readcount<-phenotypes_readcount_raw%>%
   column_to_rownames("DADA_id")
 phenotypes_readcount[phenotypes_readcount>0]<-1
 
-duck_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+duck_metadata<-readRDS("../data/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
   rename(age_chrono=age.years) %>% select(DADA_id,age_chrono)
 
 filtered_phenotypes_top50<-phenotypes_readcount%>%
@@ -495,13 +495,14 @@ p2F_gausage<-ggplot(data=most,
         panel.grid = element_blank())+
   labs(x="Age (years)",
        y="Prevalance");p2F_gausage
-ggsave(plot=p2F_gausage,filename = "../out/Figures/S3_Top50GausFeatures_noASV.png",height=20,width=22,dpi=300, units="in")
+#ggsave(plot=p2F_gausage,filename = "../out/Figures/S3_Top50GausFeatures_noASV.png",height=20,width=22,dpi=300, units="in")
 
 #ggdraw() +
  # draw_plot(p2E, x = -.01, y = .75, width = 1, height = .25) +
   #draw_plot(p2F, x= 0, y= 0, width = 1, height = .75) 
 #ggsave(filename = "../out/Figures/2CD_Gaussian50Estimates.png")
 ```
+
 ## Combination of all fig 2 plots
 ```{r}
 cow=ggdraw()+
@@ -514,7 +515,7 @@ cow=ggdraw()+
 
 cow
   
-ggsave(plot=cow,filename="../out/Figures/Fig2CowTest.png",width = 40, height = 35,units="in")
+#ggsave(plot=cow,filename="../out/Figures/Fig2CowTest.png",width = 40, height = 35,units="in")
 
 bull=ggdraw()+
   draw_plot(p2a_relabunF, x=0, y=.84, width=.5,height = 0.16)+
@@ -526,12 +527,12 @@ bull=ggdraw()+
 
 bull
   
-ggsave(plot=bull,filename="../out/Figures/Fig2BullTest2.png",width = 38, height = 40,units="in")
+#ggsave(plot=bull,filename="../out/Figures/Fig2BullTest2.png",width = 38, height = 40,units="in")
 ```
 
 # Fig 3
 ```{r gauproplot,fig.cap="A microbiome clock of aging in wild baboons. Plots show predicted microbiome age in years (age~m~) from a Gaussian process regression model, relative to each baboon's true, chronological age in years (age~c~) at the time of sample collection. (A) Shows a linear fit for all subjects in the model, and (B) shows separate linear fits for each sex. On each plot, the dashed lines indicate a 1-to-1 relationship between age~c~ and age~m~."}
-H.PredLife<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+H.PredLife<-readRDS("../data/GaussianProcessModeling/H.PredictedAgeData.rds")
 count<-H.PredLife %>% 
   group_by(sname,sex) %>% 
   summarise(count=n()) %>% 
@@ -585,11 +586,11 @@ estimatessex<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb,color=sex))+
         plot.tag = element_text(size=20))+labs(tag="B");
 grid.arrange(estimatesall, estimatessex, ncol=2)
 plots<-arrangeGrob(estimatesall,estimatessex,ncol=2)
-ggsave(plot=plots,filename = "../out/Figures/2A_GauProPlot.png",width=11,height=5,dpi=300,units="in")
+#ggsave(plot=plots,filename = "../out/Figures/2A_GauProPlot.png",width=11,height=5,dpi=300,units="in")
 ```
 
 ```{r metricsconceptual, fig.height=7,fig.width=14,fig.cap="Plots illustrating the measurement of (A) sample specific microbiome age acceleration and (B) pace of microbiome aging in individual baboons. (A) Age acceleration is calculated for each microbiome sample as the difference between age~m~ and age~c~. Samples with positive values of age acceleration (e.g. the red sample) have older predicted microbiome age estimates than their true chronological age and would be considered microbially old-for-age. Samples with negative values of age acceleration (e.g. the blue sample) are microbially young-for-age. (B) Pace of microbiome aging reflects longitudinal change in microbiome age acceleration in individuals, controlling for chronological age and environmental variables known to explain variation in gut microbiome composition in Amboseli (Ren et al., 2015; Tung et al., 2015; JB 2021). Specifically, microbiome pace of aging for a given individual was calculated as the individual's random slope, controlling for the subject's chronological age on the day of sample collection, season on the day of sample collection, average maximum temperature the month prior to sample collection, and total rainfall the month prior to sample collection, with random intercepts for the hydrological year of sample collection and the social group membership on the day of sample collection. High values of microbiome pace of aging above the population median reflect individuals who have steep slopes and therefore fast paces of microbiome aging."}
-H.PredLife<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+H.PredLife<-readRDS("../data/H.PredictedAgeData.rds")
 estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
   theme_bw()+
   geom_abline(intercept = 0, slope = 1, linetype=2,colour="black",size=1)+
@@ -636,7 +637,7 @@ estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
         legend.position = c(.2,.85), 
         legend.title=element_blank(),
         plot.tag = element_text(size=20));
-PredLifeCov<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/out/PredictedAge_EnviroCov.rds")
+PredLifeCov<-readRDS("../data/GaussianProcessModeling/out/PredictedAge_EnviroCov.rds")
 H.PredLife_F<-PredLifeCov %>% filter(sex=="F")
 H.PredLife_M<-PredLifeCov %>% filter(sex=="M")
 H.PredLife_F$resid_cov<-resid(lmer(age_mb~age_chrono+
@@ -697,7 +698,7 @@ estimatespace<-ggplot(data=PredLifeCov, aes(x=age_chrono,y=age_mb))+
         plot.tag = element_text(size=20));estimatespace
 grid.arrange(estimatesageaccel, estimatespace, ncol=2)
 plots<-arrangeGrob(estimatesageaccel,estimatespace,ncol=2)
-ggsave(plot=plots,filename="../out/Figures/4A_ConceptualMetrics.png",width=11,height=5,dpi=300,units="in")
+#ggsave(plot=plots,filename="../out/Figures/4A_ConceptualMetrics.png",width=11,height=5,dpi=300,units="in")
 ```
 
 ## Combining plots 
@@ -710,18 +711,18 @@ sheep=ggdraw()+
 
 sheep
   
-ggsave(plot=sheep,filename="../out/Figures/Fig3Sheep.png",width = 14, height = 14,units="in")
+#ggsave(plot=sheep,filename="../out/Figures/Fig3Sheep.png",width = 14, height = 14,units="in")
 ```
 
 # Fig 4
 ```{r rankplots,fig.height=11,fig.width=11, fig.cap="Rank predicts lifetime microbial aging in both sexes. Plots with yellow points (on the left; A,C) show microbial metrics of aging in females and plots with blue points (on the right; B,D) show microbial metrics of aging in males. Corrected age acceleration was corrected represents the residuals of the relationship between age~m~ and age~c~. For side by side comparison, both sexes are shown here with proportional rank values, which are derived from ordinal rank assessments. High ranked individuals are ranked closer to 1 and low ranked individuals are ranked closer to 0. However, males were modeled using ordinal rank values, as reflected by the * in the model output depicted."}
-ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>%
+ranks<-readRDS("../data/rank_raw_adult_Feb2021.rds") %>%
   select(sname,collection_date,collect_grp,ordrank,proprank)
 ranks$collect_grp<-as.factor(ranks$collect_grp)
-PredLifeCov<-readRDS("../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.rds") %>% 
+PredLifeCov<-readRDS("../data/metadata_slopes_life_and_breakpoints.rds") %>% 
   left_join(ranks,by=c("sname","collection_date","collect_grp"))
-#write_csv(PredLifeCov,"../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.csv")
-ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds")
+
+ranks<-readRDS("../data/rank_raw_adult_Feb2021.rds")
 PredLifeCov_F<-PredLifeCov %>% filter(sex=="F")
   mean(PredLifeCov_F$slope_life_1step);sd(PredLifeCov_F$slope_life_1step);
   min(PredLifeCov_F$slope_life_1step);max(PredLifeCov_F$slope_life_1step)
@@ -766,8 +767,8 @@ p.males<-ggplot(data=PredLifeCov_M,
         plot.tag = element_text(size=20),
         legend.title=element_blank())+labs(tag="B");
 
-slopes2<-readRDS("../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.rds")
-ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>% 
+slopes2<-readRDS("../data/metadata_slopes_life_and_breakpoints.rds")
+ranks<-readRDS("../data/rank_raw_adult_Feb2021.rds") %>% 
   select(sname, collection_date, ordrank,proprank)
 
 slopes2_rank<-slopes2 %>% 
@@ -822,7 +823,7 @@ slopeplot_M<-ggplot(data=slopes2_rank[slopes2_rank$sex=="M",],aes(x=avg_proprank
         legend.title=element_blank())+labs(tag="D");
 plots<-(p.females+p.males)/(slopeplot_F+slopeplot_M)
 plots
-ggsave(plot=plots,filename="../out/Figures/4C_rankplots.png",height=11,width=11, units="in", dpi=300)
+#ggsave(plot=plots,filename="../out/Figures/4C_rankplots.png",height=11,width=11, units="in", dpi=300)
 ```
 ```{r fig.height=11,fig.width=11}
 
@@ -842,7 +843,7 @@ season_females<-ggplot(data=PredLifeCov_F2,
         axis.title=element_text(size=16),
         axis.text=element_text(size=12))+labs(tag="A");
 
-EA<-readRDS("../../4_machinelearning/out/ea_dataset.rds")
+EA<-readRDS("../data/ea_dataset.rds")
 
 Male_EA<-PredLifeCov_M %>%
   select(sname,age_chrono,age_mb,delta,avg_month_maxtemp,sum_month_rain,season,collect_grp,hydroyear) %>% 
@@ -908,7 +909,7 @@ lowmatSCI_males<-ggplot(data=Male_EA,
 plots2<-(season_females+drought_males)/(grpsize_males+lowmatSCI_males)
 plots2
 
-ggsave(plot=plots2,filename="../out/Figures/4D_socioenviroplots.png")
+#ggsave(plot=plots2,filename="../out/Figures/4D_socioenviroplots.png")
 ```
 
 
