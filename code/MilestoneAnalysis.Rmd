@@ -1,0 +1,1880 @@
+---
+title: "Estimating Onset of Maturational Milestones and/or Survival"
+author: "Mauna Dasari"
+date: "09/29/2022"
+output:
+  html_document:
+    number_sections: no
+    theme: paper
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,warning=F,message=F,cache=2)
+library(feather);library(tidyverse);library(kableExtra);library(gridExtra);
+library(lme4);library(lmerTest);library(mgcv);library(survival);library(survminer);
+
+# BASIC DATA FOR ALL MILESTONES
+statuses<-readRDS("../../1_data/out/statuses_updatedDec2020.rds")
+#mom_ranks<-readRDS("../../1_data/out/mom_rank_updatedDec2020.rds") %>% select(sname,mom_rank)
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds")
+
+charpentier_byyear_matsister<-readRDS("../../1_data/out/charpentier_byyear_matsisters.rds") %>% select(sname,collection_date,maternal_sisters_mat) 
+charpentier_byyear_rainetc<-readRDS("../../1_data/out/charpentier_byyear_rain_collectgrp_excessf.rds") %>% 
+  left_join(charpentier_byyear_matsister,by=c("sname","collection_date")) %>% 
+  select(tid,sname,collection_date,cyear_start,cyear_end,avg_adf_collect,
+         rain_yr,excess_cfemales_yr,maternal_sisters_mat) %>% 
+  mutate(maternal_sisters_mat=case_when(is.na(maternal_sisters_mat)~0,
+                              !is.na(maternal_sisters_mat)~maternal_sisters_mat)) %>% 
+  rename(avg_adf_yr=avg_adf_collect,
+         matsisters_yr=maternal_sisters_mat)
+charpentier2008<-readRDS("../../1_data/out/metadata_charpentier2008_predictors.rds") %>% 
+  select(-c(sex,birth))
+mom_present<-readRDS("../../1_data/out/mom_presence_at_mat_Jan2021.rds") %>% 
+  select(sname,sex,starts_with("mompresent_")) 
+mom_present<-mom_present[!duplicated(mom_present$sname),]
+#dropping animals where mom was between groups etc (7 individuals)
+
+newhybridscore<-read_csv("../in/sname_anubis_ancestry_for_Babase_from_Vilgalys_Fogel_2022_Science.csv")
+
+metadata_all<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+  rename(age_firstlivebirth=age_first_live_birth,
+         age_firstpreg=age_first_preg,
+         age_chrono=age.years) %>% 
+  mutate(age_stat=(statdate-birth)/365.25) %>% 
+  select(-statdate,-status,-mom_rank) %>% 
+  left_join(statuses,by="sname") # %>% 
+  #left_join(mom_ranks,by="sname")
+
+count<-metadata_all %>% 
+  group_by(sname) %>% 
+  mutate(count_life=n()) %>% 
+  ungroup() %>% 
+  group_by(sname,count_life) %>% 
+  summarise() %>% 
+  ungroup()
+
+metadata_lifespan<-metadata_all %>% 
+  left_join(count,by=c("sname")) %>% 
+  select(tid,DADA_id,sname,sex,birth,collection_date,age_chrono,collect_grp,status,statdate,grpdensity_adf,count_life) %>% #used to include mom_rank
+  left_join(charpentier_byyear_rainetc, by=c("tid","sname","collection_date")) %>% 
+  left_join(charpentier2008, by=c("sname")) %>% 
+  left_join(mom_present,by=c("sname","sex")) %>% 
+  left_join(newhybridscore,by="sname") %>% 
+  filter(collect_grp<3) %>% 
+  mutate(collect_grp=as.factor(collect_grp))
+
+EA<-readRDS("../../4_machinelearning/out/ea_dataset.rds") %>% select(-birth) %>%
+  select(sname,lowMatRank,cumulative_adversity)
+
+PredLifeECov_raw<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/out/PredictedAge_EnviroCov.rds") 
+PredLifeCov<-PredLifeECov_raw %>% 
+  right_join(metadata_lifespan,by=c("DADA_id","sname","sex","collection_date","collect_grp","age_chrono")) %>% 
+  left_join(EA,by=c("sname")) %>% 
+  #filter(!is.na(age_mb)&!is.na(age_chrono)) %>% 
+  distinct() 
+
+females<-PredLifeCov %>% filter(sex=="F")
+females_life <-females %>% filter(count_life>=3)
+
+females_life$resid_life<-resid(lmer(age_mb~age_chrono+ #AIC 37365.56
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                                    data=females_life,
+                                    control=lmerControl(optCtrl=list(maxfun=2000))))
+
+females_life$accel_resid_noage<-resid(lmer(age_mb~#age_chrono+ #AIC 37365.56
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                                    data=females_life,
+                                    control=lmerControl(optCtrl=list(maxfun=2000))))
+
+m.slope_1step<-lmer(age_mb~age_chrono+
+                avg_month_maxtemp+
+                sum_month_rain+ 
+                season+ 
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),data=females_life,
+                control=lmerControl(optCtrl=list(maxfun=2000)))
+ladylifeslopes<-coef(m.slope_1step)$sname %>% 
+  rename(intercept_life_1step=`(Intercept)`,
+    slope_life_1step=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname,slope_life_1step,intercept_life_1step) 
+
+PredLifeCov_F<-females_life %>% 
+  left_join(ladylifeslopes,by="sname")
+
+PredLifeCov_F2<-PredLifeCov_F
+
+PredLifeCov_F2$pace_noage<-resid(lmer(age_mb~#age_chrono+
+                avg_month_maxtemp+
+                sum_month_rain+ 
+                season+ 
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),data=females_life,
+                control=lmerControl(optCtrl=list(maxfun=2000))))
+
+PredLifeCov_F<-PredLifeCov_F %>% select(-accel_resid_noage)
+
+
+#upped the number of iterations because the male model wasn't converging bc of collect_grp
+males<-PredLifeCov %>% filter(sex=="M")
+males_life <-males %>% filter(count_life>=3)
+
+males_life$resid_life<-resid(lmer(age_mb~age_chrono+ #AIC 37365.56
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                                    data=males_life,
+                                    control=lmerControl(optCtrl=list(maxfun=2000))))
+
+m.slope_1step<-lmer(age_mb~age_chrono+
+                avg_month_maxtemp+
+                sum_month_rain+ 
+                season+ 
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),data=males_life,
+                control=lmerControl(optCtrl=list(maxfun=2000)))
+boilifeslopes<-coef(m.slope_1step)$sname %>% 
+  rename(intercept_life_1step=`(Intercept)`,
+    slope_life_1step=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname,slope_life_1step,intercept_life_1step)
+PredLifeCov_M<-males_life %>% 
+  left_join(boilifeslopes,by="sname") 
+
+PredLifeCov_M$resid_life<-as.numeric(PredLifeCov_M$resid_life)
+PredLifeCov_M$resid_life[is.nan(PredLifeCov_M$resid_life)]<-NA
+
+PredLifeCov<-rbind(PredLifeCov_M,PredLifeCov_F) %>% arrange(sname,age_chrono)
+
+#saveRDS(PredLifeCov,"../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.rds")
+#write_csv(PredLifeCov,"../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.csv")
+```
+
+# Introduction
+## Does microbiome age predict maturation and other milestones? 
+*originally part of the HetGPR_clean file, but split out for ease of access on 11/24/2020.*
+
+Or, what are the consequences of variation in microbial age? Here, I'll take the residuals of $age_{microbial}$~$age_{chronological}$+$seasonal covariates$ (see below) as microbial acceleration and the slope as 'pace of aging' to see how predictive these markers are of the timing of maturational milestones and death.
+
+***
+
+**Residuals**
+
+First, we compared whether it made more sense to account for covariates or not. Since it didn't seem to make a difference in residual spread and because the AICs of the covariate included models are lower, I went with the residuals corrected for covariates.
+
+Additionally, these residuals only included the animals that either matured *within* the sampling period or did not mature and had a status of 0, 2, or 3 (to be censored).
+
+# Poking a stick at pace of aging
+## All Animals, Entire Lifespan {.tabset}
+### 1 step slope
+```{r fig.width=10, eval=F}
+Summary_MaleCov<-PredLifeCov_M %>%
+  group_by(sname,slope_life_1) %>% 
+  summarise(avg_agec=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(slope_over_age=slope_life_1/avg_agec)
+plot1_M<-ggplot(data=Summary_MaleCov,
+       aes(x=avg_agec,y=slope_life_1))+
+  geom_point(color='#115163',size=2)+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging")+
+  ylim(0,1)+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot2_M<-ggplot(data=Summary_MaleCov,
+       aes(x=avg_agec,y=slope_over_age))+
+  geom_point(color='#115163')+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging Normalized by Mean Chronological Age")+
+  ylim(0,1)+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot3_M<-ggplot(data=Summary_MaleCov,aes(x=slope_over_age))+
+  geom_histogram(fill='#115163')+
+  xlab("Individual's Pace of Aging Divided by Mean Chronological Age")+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+
+Summary_FemaleCov<-PredLifeCov_F %>%
+  group_by(sname,slope_life_1) %>% 
+  summarise(avg_agec=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(slope_over_age=slope_life_1/avg_agec)
+plot1_F<-ggplot(data=Summary_FemaleCov,
+       aes(x=avg_agec,y=slope_life_1))+
+  geom_point(color='darkgoldenrod3',size=2)+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging")+
+  ylim(0,1)+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot2_F<-ggplot(data=Summary_FemaleCov,
+       aes(x=avg_agec,y=slope_over_age))+
+  geom_point(color='darkgoldenrod3')+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging Normalized by Mean Chronological Age")+
+  ylim(0,1)+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot3_F<-ggplot(data=Summary_FemaleCov,aes(x=slope_over_age))+
+  geom_histogram(fill='darkgoldenrod3')+
+  xlab("Individual's Pace of Aging Divided by Mean Chronological Age")+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+grid.arrange(plot1_M, plot1_F, ncol=2)
+grid.arrange(plot2_M, plot2_F, ncol=2)
+grid.arrange(plot3_M, plot3_F, ncol=2)
+```
+
+### 2 step slope
+```{r fig.width=10, eval=F}
+Summary_MaleCov<-PredLifeCov_M %>%
+  group_by(sname,slope_life_2) %>% 
+  summarise(avg_agec=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(slope_over_age=slope_life_2/avg_agec)
+plot1_M<-ggplot(data=Summary_MaleCov,
+       aes(x=avg_agec,y=slope_life_2))+
+  geom_point(color='#115163',size=2)+
+  ylim(-0.4,0.4)+ggtitle("Two Step Slope")+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging")+
+  theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot2_M<-ggplot(data=Summary_MaleCov,
+       aes(x=avg_agec,y=slope_over_age))+
+  geom_point(color='#115163')+
+  ylim(-0.4,0.4)+ggtitle("Two Step Slope")+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging Normalized by Mean Chronological Age")+
+  theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot3_M<-ggplot(data=Summary_MaleCov,aes(x=slope_over_age))+
+  geom_histogram(fill='#115163')+
+  ggtitle("Two Step Slope")+
+  xlab("Individual's Pace of Aging Divided by Mean Chronological Age")+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+
+Summary_FemaleCov<-PredLifeCov_F %>%
+  group_by(sname,slope_life_2) %>% 
+  summarise(avg_agec=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(slope_over_age=slope_life_2/avg_agec)
+plot1_F<-ggplot(data=Summary_FemaleCov,
+       aes(x=avg_agec,y=slope_life_2))+
+  geom_point(color='darkgoldenrod3',size=2)+
+  ylim(-0.4,0.4)+ggtitle("Two Step Slope")+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging")+
+  theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot2_F<-ggplot(data=Summary_FemaleCov,
+       aes(x=avg_agec,y=slope_over_age))+
+  geom_point(color='darkgoldenrod3')+
+  ylim(-0.4,0.4)+ggtitle("Two Step Slope")+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging Normalized by Mean Chronological Age")+
+  theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+plot3_F<-ggplot(data=Summary_FemaleCov,aes(x=slope_over_age))+
+  geom_histogram(fill='darkgoldenrod3')+
+  ggtitle("Two Step Slope")+
+  xlab("Individual's Pace of Aging Divided by Mean Chronological Age")+theme_bw()+theme(aspect.ratio = 1,
+          axis.text.x = element_text(size=14,color="black"),
+          axis.text.y = element_text(size=14,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_text(size=18,color="black"))
+grid.arrange(plot1_M, plot1_F, ncol=2)
+grid.arrange(plot2_M, plot2_F, ncol=2)
+grid.arrange(plot3_M, plot3_F, ncol=2)
+```
+
+# Female Rank Attainment
+## Prior to Milestone
+### Data 
+```{r}
+ladyrank<-readRDS("../../1_data/out/milestone_female_rankattainment_mompresent.rds") %>%
+  select(-c(sex,birth,status,statdate,mstatus)) %>%  
+  rename(rankedf=rnkdate_focal,
+         mompresent_rankedf=mom_present) %>% 
+  select(sname,rankedf,mompresent_rankedf,rnktype_focal)
+PriorLadyRank<-PredLifeCov_F %>% 
+  left_join(ladyrank,by="sname") %>% 
+  mutate(age_rankedf=as.numeric((rankedf-birth)/365.25)) %>% 
+  filter(case_when(!is.na(rankedf)~rankedf>min(metadata_all$collection_date),
+                   is.na(rankedf)~age_chrono<max(age_rankedf,na.rm=T)&
+                     (status==0|status==2|status==3))) %>% 
+  filter(age_chrono<max(age_rankedf,na.rm=T))
+PriorLadyRank$resid_cov<-resid(lmer(age_mb~age_chrono+ 
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                      data=PriorLadyRank,
+                      control=lmerControl(optCtrl=list(maxfun=2000))))
+count<-PriorLadyRank %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+PriorLadyRank<-PriorLadyRank %>% 
+  filter(sname %in% count$sname)
+m.slope_priorrankedf<-lmer(age_mb~age_chrono+ 
+                              avg_month_maxtemp+
+                              sum_month_rain+
+                              season+
+                              (1|collect_grp)+
+                              (1|hydroyear)+
+                              (1+age_chrono|sname),
+                            data=PriorLadyRank,
+                            control=lmerControl(optCtrl=list(maxfun=2000)))
+slope_F<-coef(m.slope_priorrankedf)$sname %>% 
+  rename(slope_rankedf=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_rankedf)
+PriorLadyRank<-PriorLadyRank %>% 
+  left_join(slope_F,by="sname")
+Summary_PriorLadyRank<-PriorLadyRank %>%
+  group_by(sname) %>% 
+  mutate(resid_avg_priorrankedf=mean(resid_cov),
+         rain_avg_priorrankedf=mean(rain_yr,na.rm=T),
+         matsis_avg_priorrankedf=mean(matsisters_yr,na.rm=T),
+         adf_avg_priorrankedf=mean(avg_adf_yr,na.rm=T),
+         age_avg_priorrankedf=mean(age_chrono)) %>%  
+  ungroup() %>% 
+  group_by(sname,sex,status,birth,statdate,rankedf,resid_avg_priorrankedf,slope_rankedf,age_rankedf,rnktype_focal,matsis_avg_priorrankedf,mompresent_rankedf,adf_avg_priorrankedf,rain_avg_priorrankedf,hybridscore,lowMatRank,age_avg_priorrankedf,genome_wide_anubis_ancestry) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  mutate(time=case_when(is.na(rankedf)~(statdate-birth)/365.25,
+                       !is.na(rankedf)~(rankedf-birth)/365.25),
+         event=case_when(is.na(rankedf)~0,
+                         !is.na(rankedf)&rnktype_focal=="ADF"~0,
+                         !is.na(rankedf)&rnktype_focal=="ALF"~1),
+         type_cov_accel=case_when(resid_avg_priorrankedf>
+                                    median(resid_avg_priorrankedf)~"old",
+                                  resid_avg_priorrankedf<
+                                    median(resid_avg_priorrankedf)~"young",
+                                  resid_avg_priorrankedf==
+                                    median(resid_avg_priorrankedf)~"young"),
+         type_cov_pace=case_when(slope_rankedf>median(slope_rankedf)~"Faster",
+                                 slope_rankedf<median(slope_rankedf)~"Slower",
+                                 slope_rankedf==median(slope_rankedf)~"Faster")) %>% 
+  ungroup() 
+#saveRDS(Summary_PriorLadyRank,"../out/DataForFigures/rankattainment_females_prior_linear_2022.rds")
+```
+
+
+### Plots
+```{r}
+survfit.cov.PriorLadyRank<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_PriorLadyRank)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorLadyRank, 
+                 data = Summary_PriorLadyRank, 
+                 fun="event",
+                 title = "Age Acceleration Curves Prior to Female Rank Attainment",
+                 ylab = "Probability of Female Rank Attainment",
+                 xlab = "Time in Years",
+                 break.x.by = 1,
+                 xlim=c(0,7),
+                 conf.int = T,
+                 pval = F, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 2.24, linetype = "solid", color="red")
+p.coxph.cov
+```
+
+### Models {.tabset}
+```{r}
+coxph.LadyRank.cov_original<-coxph(Surv(time,event)~resid_avg_priorrankedf
+                        #  +slope_rankedf
+                          #+age_avg_priorrankedf
+                          +mompresent_rankedf
+                          +matsis_avg_priorrankedf
+                          +lowMatRank
+                          +adf_avg_priorrankedf
+                          +rain_avg_priorrankedf
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorLadyRank)
+sink("model.txt")
+summary(coxph.LadyRank.cov_original);cox.zph(coxph.LadyRank.cov_original)
+sink()
+ggforest(coxph.LadyRank.cov_original,data=Summary_PriorLadyRank,
+         main="Covariates Prior to Female Rank Attainment")
+
+coxph.LadyRank.cov_ageexplicit<-coxph(Surv(time,event)~accel_avg_priorrankedf
+                          #+slope_rankedf
+                          +age_avg_priorrankedf
+                          +mompresent_rankedf
+                          +matsis_avg_priorrankedf
+                          +lowMatRank
+                          +adf_avg_priorrankedf
+                          +rain_avg_priorrankedf
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorLadyRank)
+summary(coxph.LadyRank.cov_original);cox.zph(coxph.LadyRank.cov_original)
+ggforest(coxph.LadyRank.cov_original,data=Summary_PriorLadyRank,
+         main="Covariates Prior to Female Rank Attainment")
+```
+
+#### Test for Age Variable Comparisons
+```{r}
+ladyrank<-readRDS("../../1_data/out/milestone_female_rankattainment_mompresent.rds") %>%
+  select(-c(sex,birth,status,statdate,mstatus)) %>%  
+  rename(rankedf=rnkdate_focal,
+         mompresent_rankedf=mom_present) %>% 
+  select(sname,rankedf,mompresent_rankedf,rnktype_focal)
+
+PriorLadyRank<-PredLifeCov_F %>% 
+  left_join(ladyrank,by="sname") %>% 
+  mutate(age_rankedf=as.numeric((rankedf-birth)/365.25)) %>% 
+  filter(case_when(!is.na(rankedf)~rankedf>min(metadata_all$collection_date),
+                   is.na(rankedf)~age_chrono<max(age_rankedf,na.rm=T)&
+                     (status==0|status==2|status==3))) %>% 
+  filter(age_chrono<max(age_rankedf,na.rm=T))
+
+PriorLadyRank$resid_cov<-resid(lmer(age_mb~age_chrono+ 
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                      data=PriorLadyRank,
+                      control=lmerControl(optCtrl=list(maxfun=2000)))) #original
+
+PriorLadyRank$accel_resid_age<-resid(lmer(age_mb~age_chrono+ 
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                      data=PriorLadyRank,
+                      control=lmerControl(optCtrl=list(maxfun=2000)))) #original renamed
+
+PriorLadyRank$accel_resid_noage<-resid(lmer(age_mb~#age_chrono+ 
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                      data=PriorLadyRank,
+                      control=lmerControl(optCtrl=list(maxfun=2000)))) 
+
+count<-PriorLadyRank %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+PriorLadyRank<-PriorLadyRank %>% 
+  filter(sname %in% count$sname)
+
+m.slope_priorrankedf<-lmer(age_mb~age_chrono+ 
+                              avg_month_maxtemp+
+                              sum_month_rain+
+                              season+
+                              (1|collect_grp)+
+                              (1|hydroyear)+
+                              (1+age_chrono|sname),
+                            data=PriorLadyRank,
+                            control=lmerControl(optCtrl=list(maxfun=2000))) #original
+slope_F<-coef(m.slope_priorrankedf)$sname %>% 
+  rename(slope_rankedf=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_rankedf)
+PriorLadyRank<-PriorLadyRank %>% 
+  left_join(slope_F,by="sname")
+
+pace_noage<-lmer(age_mb~#age_chrono+ 
+                              avg_month_maxtemp+
+                              sum_month_rain+
+                              season+
+                              (1|collect_grp)+
+                              (1|hydroyear)+
+                              (1+age_chrono|sname),
+                            data=PriorLadyRank,
+                            control=lmerControl(optCtrl=list(maxfun=2000))) #original
+slope_F<-coef(pace_noage)$sname %>% 
+  rename(pace_noage_rankedf=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, pace_noage_rankedf)
+PriorLadyRank<-PriorLadyRank %>% 
+  left_join(slope_F,by="sname")
+
+PriorLadyRank$pace_resid<-resid(lmer(age_mb~age_chrono+ 
+                              avg_month_maxtemp+
+                              sum_month_rain+
+                              season+
+                              (1|collect_grp)+
+                              (1|hydroyear)+
+                              (1+age_chrono|sname),
+                            data=PriorLadyRank,
+                            control=lmerControl(optCtrl=list(maxfun=2000))))
+
+Summary_PriorLadyRank<-PriorLadyRank %>%
+  group_by(sname) %>% 
+  mutate(resid_avg_priorrankedf=mean(resid_cov),
+         rain_avg_priorrankedf=mean(rain_yr,na.rm=T),
+         matsis_avg_priorrankedf=mean(matsisters_yr,na.rm=T),
+         adf_avg_priorrankedf=mean(avg_adf_yr,na.rm=T),
+         age_avg_priorrankedf=mean(age_chrono),
+         age_mb_avg_priorrankedf=mean(age_mb),
+         delta_avg_priorrankedf=mean(delta),
+         accelnoage_avg_priorrankedf=mean(accel_resid_noage,na.rm=T),
+         pacenoage_avg_priorrankedf=mean(pace_noage_rankedf,na.rm=T),
+         pace_avg_resid_priorrankedf=mean(pace_resid,na.rm=T)) %>%  
+  ungroup() %>% 
+  group_by(sname,sex,status,birth,statdate,rankedf,resid_avg_priorrankedf,slope_rankedf,age_rankedf,rnktype_focal,matsis_avg_priorrankedf,mompresent_rankedf,adf_avg_priorrankedf,rain_avg_priorrankedf,hybridscore,lowMatRank,age_avg_priorrankedf,genome_wide_anubis_ancestry,accelnoage_avg_priorrankedf,pacenoage_avg_priorrankedf,pace_avg_resid_priorrankedf,age_mb_avg_priorrankedf,delta_avg_priorrankedf) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  mutate(time=case_when(is.na(rankedf)~(statdate-birth)/365.25,
+                       !is.na(rankedf)~(rankedf-birth)/365.25),
+         event=case_when(is.na(rankedf)~0,
+                         !is.na(rankedf)&rnktype_focal=="ADF"~0,
+                         !is.na(rankedf)&rnktype_focal=="ALF"~1),
+         type_cov_accel=case_when(resid_avg_priorrankedf>
+                                    median(resid_avg_priorrankedf)~"old",
+                                  resid_avg_priorrankedf<
+                                    median(resid_avg_priorrankedf)~"young",
+                                  resid_avg_priorrankedf==
+                                    median(resid_avg_priorrankedf)~"young"),
+         type_cov_pace=case_when(slope_rankedf>median(slope_rankedf)~"Faster",
+                                 slope_rankedf<median(slope_rankedf)~"Slower",
+                                 slope_rankedf==median(slope_rankedf)~"Faster")) %>% 
+  ungroup() 
+#saveRDS(Summary_PriorLadyRank,"../out/DataForFigures/rankattainment_females_prior_linear_2022.rds")
+
+coxph.LadyRank.cov_original<-coxph(Surv(time,event)~resid_avg_priorrankedf
+                          +slope_rankedf
+                          +age_avg_priorrankedf
+                          +mompresent_rankedf
+                          +matsis_avg_priorrankedf
+                          +lowMatRank
+                          +adf_avg_priorrankedf
+                          +rain_avg_priorrankedf
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorLadyRank)
+sink("originalmodel.csv")
+summary(coxph.LadyRank.cov_original);cox.zph(coxph.LadyRank.cov_original)
+sink()
+ggforest(coxph.LadyRank.cov_original,data=Summary_PriorLadyRank,
+         main="Covariates Prior to Female Rank Attainment - Original")
+
+
+coxph.LadyRank.cov_ageexplicit<-coxph(Surv(time,event)~delta_avg_priorrankedf
+                          +pacenoage_avg_priorrankedf
+                          +age_avg_priorrankedf
+                          +mompresent_rankedf
+                          +matsis_avg_priorrankedf
+                          +lowMatRank
+                          +adf_avg_priorrankedf
+                          +rain_avg_priorrankedf
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorLadyRank)
+sink("ageexplicitmodel.csv")
+summary(coxph.LadyRank.cov_ageexplicit);cox.zph(coxph.LadyRank.cov_ageexplicit)
+sink()
+ggforest(coxph.LadyRank.cov_ageexplicit,data=Summary_PriorLadyRank,
+         main="Covariates Prior to Female Rank Attainment - Age Explicit")
+
+coxph.LadyRank.cov_resid<-coxph(Surv(time,event)~resid_avg_priorrankedf
+                          +pace_avg_resid_priorrankedf
+                          +mompresent_rankedf
+                          +matsis_avg_priorrankedf
+                          +lowMatRank
+                          +adf_avg_priorrankedf
+                          +rain_avg_priorrankedf
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorLadyRank)
+sink("residmodel.csv")
+summary(coxph.LadyRank.cov_resid);cox.zph(coxph.LadyRank.cov_resid)
+sink()
+ggforest(coxph.LadyRank.cov_resid,data=Summary_PriorLadyRank,
+         main="Covariates Prior to Female Rank Attainment - Residuals")
+```
+
+# Menarche {.tabset}
+## Prior to Milestone {.tabset .tabset-pills}
+### Data 
+```{r}
+PriorMenarche<-PredLifeCov_F %>%  
+  filter(case_when(!is.na(matured)~matured>min(metadata_all$collection_date)&mstatus=="O",
+                   is.na(matured)~(status==0|status==2|status==3))) %>% 
+  filter(age_chrono<max(age_matured,na.rm=T))
+
+PriorMenarche$resid_cov<-resid(lmer(age_mb~age_chrono+ 
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                      data=PriorMenarche,
+                      control=lmerControl(optCtrl=list(maxfun=2000))))
+
+count<-PriorMenarche %>% 
+  #filter(case_when(!is.na(age_matured)~age_chrono<=age_matured,
+  #                 is.na(age_matured)~age_chrono<=max(age_matured,na.rm=T))) %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+PriorMenarche<-PriorMenarche %>% 
+  filter(sname %in% count$sname)
+
+m.slope_priormenarche<-lmer(age_mb~age_chrono+ 
+                              avg_month_maxtemp+
+                              sum_month_rain+
+                              season+
+                              (1|collect_grp)+
+                              (1|hydroyear)+
+                              (1+age_chrono|sname),
+                            data=PriorMenarche,
+                            control=lmerControl(optCtrl=list(maxfun=2000)))
+slope_F<-coef(m.slope_priormenarche)$sname %>% 
+  rename(slope_covmenarche=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_covmenarche)
+PriorMenarche<-PriorMenarche %>% 
+  left_join(slope_F,by="sname")
+
+Summary_PriorMenarche<-PriorMenarche %>%
+  group_by(sname) %>% 
+  mutate(resid_avg_priormenarche=mean(resid_cov),
+         rain_avg_priormenarche=mean(rain_yr,na.rm=T),
+         matsis_avg_priormenarche=mean(matsisters_yr,na.rm=T),
+         adf_avg_priormenarche=mean(avg_adf_yr,na.rm=T),
+         age_avg_priormenarche=mean(age_chrono)) %>%  
+  ungroup() %>% 
+  group_by(sname,sex,status,birth,statdate,matured,resid_avg_priormenarche,slope_covmenarche,mstatus,age_matured,matsis_avg_priormenarche,mompresent_mat,adf_avg_priormenarche,rain_avg_priormenarche,hybridscore,lowMatRank,age_avg_priormenarche,genome_wide_anubis_ancestry) %>% 
+  summarise() %>% 
+  ungroup() 
+
+Summary_PriorMenarche<-Summary_PriorMenarche %>% 
+  mutate(time=case_when(is.na(matured)~(statdate-birth)/365.25,
+                       !is.na(matured)~(matured-birth)/365.25),
+         event=case_when(is.na(matured)~0,
+                         !is.na(matured)~1),
+         type_cov_accel=case_when(resid_avg_priormenarche>
+                                    median(resid_avg_priormenarche)~"old",
+                                  resid_avg_priormenarche<
+                                    median(resid_avg_priormenarche)~"young",
+                                  resid_avg_priormenarche==
+                                    median(resid_avg_priormenarche)~"young"),
+         type_cov_pace=case_when(slope_covmenarche>median(slope_covmenarche)~"Faster",
+                                 slope_covmenarche<median(slope_covmenarche)~"Slower",
+                                 slope_covmenarche==median(slope_covmenarche)~"Faster")) %>% 
+  ungroup() %>% drop_na()
+saveRDS(Summary_PriorMenarche,"../out/DataForFigures/menarche_prior_linear_2022.rds")
+```
+
+### Plots
+```{r}
+survfit.cov.PriorMenarche<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_PriorMenarche)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorMenarche, 
+                 data = Summary_PriorMenarche, 
+                 fun="event",
+                 title = "Age Acceleration Curves Prior to Menarche",
+                 ylab = "Probability of Menarche",
+                 xlab = "Time in Years",
+                 break.x.by = 0.5,
+                 xlim=c(2.5,6.5),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 4.51, linetype = "solid", color="red")
+p.coxph.cov
+
+```
+
+### Models {.tabset}
+```{r}
+coxph.menarche.cov<-coxph(Surv(time,event)~resid_avg_priormenarche
+                          #+type_cov_pace
+                          #+age_avg_priormenarche
+                          +mompresent_mat
+                          +matsis_avg_priormenarche
+                          +lowMatRank
+                          +adf_avg_priormenarche
+                          +rain_avg_priormenarche
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorMenarche)
+sink("model.txt")
+AIC(coxph.menarche.cov);summary(coxph.menarche.cov); 
+cox.zph(coxph.menarche.cov)
+sink()
+ggforest(coxph.menarche.cov,data=Summary_PriorMenarche,
+         main="Covariates Prior to Menarche")
+
+coxph.menarche.cov<-coxph(Surv(time,event)~type_cov_accel
+                          #+type_cov_pace
+                          #+age_avg_priormenarche
+                          +mompresent_mat
+                          +matsis_avg_priormenarche
+                          +lowMatRank
+                          +adf_avg_priormenarche
+                          +rain_avg_priormenarche
+                          +genome_wide_anubis_ancestry
+                          ,data=Summary_PriorMenarche)
+AIC(coxph.menarche.cov);summary(coxph.menarche.cov); 
+cox.zph(coxph.menarche.cov)
+ggforest(coxph.menarche.cov,data=Summary_PriorMenarche,
+         main="Covariates Prior to Menarche")
+
+#fit0<-survfit(Surv(age_death_or_censored,censored)~allsame,data=eli_fq)
+#fit0 #to get median survival times
+```
+
+# First Live Birth {.tabset .tabset-pills}
+## Prior to Milestone {.tabset}
+### Data
+```{r}
+Priorfirstlivebirth<-PredLifeCov_F %>%  
+  filter(case_when(!is.na(date_firstlivebirth)~
+                     date_firstlivebirth>min(metadata_all$collection_date),
+                   is.na(date_firstlivebirth)~status==0|status>1)) %>% 
+  filter(age_chrono<max(age_firstlivebirth,na.rm=T)) 
+
+Priorfirstlivebirth$resid_cov<-resid(lmer(age_mb~age_chrono+ 
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                                    data=Priorfirstlivebirth,
+                                    control=lmerControl(optCtrl=list(maxfun=2000))))
+count<-Priorfirstlivebirth %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+Priorfirstlivebirth<-Priorfirstlivebirth %>% 
+  filter(sname %in% count$sname)
+
+m.slope<-lmer(age_mb~age_chrono+ 
+                avg_month_maxtemp+
+                sum_month_rain+
+                season+
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),
+              data=Priorfirstlivebirth,
+              control=lmerControl(optCtrl=list(maxfun=2000)))
+
+slope_F<-coef(m.slope)$sname %>% 
+  rename(slope_covfirstlb=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_covfirstlb)
+Priorfirstlivebirth<-Priorfirstlivebirth %>% 
+  left_join(slope_F,by="sname")
+
+Summary_Priorfirstlivebirth<-Priorfirstlivebirth %>% 
+  group_by(sname) %>% 
+  mutate(resid_avg_prior=mean(resid_cov),
+         adf_avg_prior=mean(avg_adf_yr,na.rm=T),
+         matsis_avg_prior=mean(matsisters_yr,na.rm=T),
+         rain_avg_prior=mean(rain_yr,na.rm=T),
+         age_avg_prior=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  group_by(sname,sex,birth,statdate,resid_avg_prior,slope_covfirstlb,age_firstlivebirth,date_firstlivebirth,mompresent_lb,hybridscore,adf_avg_prior,matsis_avg_prior,rain_avg_prior,lowMatRank,age_avg_prior,genome_wide_anubis_ancestry) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  mutate(time=case_when(is.na(date_firstlivebirth)~(statdate-birth)/365.25,
+                       !is.na(date_firstlivebirth)~(date_firstlivebirth-birth)/365.25),
+         event=case_when(is.na(date_firstlivebirth)~0,
+                         !is.na(date_firstlivebirth)~1),
+         type_cov_accel=case_when(resid_avg_prior>median(resid_avg_prior)~"old",
+                            resid_avg_prior<median(resid_avg_prior)~"young",
+                            resid_avg_prior==median(resid_avg_prior)~"old"),
+         type_cov_pace=case_when(slope_covfirstlb>median(slope_covfirstlb)~"faster",
+                            slope_covfirstlb<median(slope_covfirstlb)~"slower",
+                            slope_covfirstlb==median(slope_covfirstlb)~"faster")) %>% 
+  ungroup()
+```
+
+### Plots
+```{r}
+survfit.cov.Priorfirstlivebirth<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_Priorfirstlivebirth)
+p.coxph.cov<-ggsurvplot(survfit.cov.Priorfirstlivebirth, 
+                 data = Summary_Priorfirstlivebirth, 
+                 fun="event",
+                 title = "First LB Curves for Age Accel Prior to Milestone",
+                 ylab = "Probability of First LB",
+                 xlab = "Time in Years",
+                 break.x.by = 0.5,
+                 xlim=c(4.5,10),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 5.97, linetype = "solid", color="red")
+p.coxph.cov
+survfit.cov.PriorFirstLiveBirth<-survfit(Surv(time,event)~type_cov_pace,
+                          data=Summary_Priorfirstlivebirth)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorFirstLiveBirth, 
+                 data = Summary_Priorfirstlivebirth, 
+                 fun="event",
+                 title = "First LB Curves for Slope Prior to Milestone",
+                 ylab = "Probability of First LB",
+                 xlab = "Time in Years",
+                 break.x.by = 0.5,
+                 xlim=c(4.5,10),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Pace of aging",  ### Change legend titles
+                 legend.labs =c("Faster","Slower"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 5,97, linetype = "solid", color="red")
+p.coxph.cov
+```
+
+### Models {.tabset}
+```{r}
+coxph.firstlivebirth.cov<-coxph(Surv(time,event)~resid_avg_prior
+                                #+slope_covfirstlb
+                               # +age_avg_prior
+                                +mompresent_lb
+                                +matsis_avg_prior
+                                +lowMatRank
+                                +adf_avg_prior
+                                +rain_avg_prior
+                                +genome_wide_anubis_ancestry
+                           ,data=Summary_Priorfirstlivebirth)
+sink("model.txt")
+summary(coxph.firstlivebirth.cov);cox.zph(coxph.firstlivebirth.cov)
+sink()
+ggforest(coxph.firstlivebirth.cov,data=Summary_Priorfirstlivebirth,
+         main="Covariates for Age Accel Prior to First LB")
+
+```
+
+# Testicular Enlargement {.tabset .tabset-pills}
+## Prior to Milestone {.tabset}
+### Data
+```{r}
+PriorTE<-PredLifeCov_M %>%  
+  filter(case_when(!is.na(matured)~matured>min(metadata_all$collection_date)&mstatus=="O",
+                   is.na(matured)~status==0|status==2|status==3)) %>% 
+  filter(age_chrono<=max(matured,na.rm=T)) %>% 
+  drop_na(hydroyear)
+
+PriorTE$resid_cov<-resid(lmer(age_mb~age_chrono+
+                                avg_month_maxtemp+
+                                sum_month_rain+
+                                season+
+                                (1|collect_grp)+
+                                (1|hydroyear),
+                              data=PriorTE,
+                              control=lmerControl(optCtrl=list(maxfun=2000))))
+
+filterPriorTE<-PriorTE %>%   
+  #filter(case_when(!is.na(age_matured)~age_chrono<=age_matured,
+  #                 is.na(age_matured)~age_chrono<=max(age_matured,na.rm=T))) %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% filter(count>=3)
+PriorTE<-PriorTE %>% 
+  filter(sname %in% filterPriorTE$sname)
+
+m.slope<-lmer(age_mb~age_chrono+ 
+                avg_month_maxtemp+
+                sum_month_rain+
+                season+
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),
+              data=PriorTE,
+              control=lmerControl(optCtrl=list(maxfun=2000)))
+slope_M<-coef(m.slope)$sname %>% 
+  rename(slope_covTE=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_covTE)
+
+Summary_PriorTE<-PriorTE %>% 
+  left_join(slope_M,by="sname") %>% 
+  group_by(sname) %>% 
+  mutate(resid_avg_TE=mean(resid_cov,na.rm=T),
+         rain_avg_TE=mean(rain_yr,na.rm=T),
+         matsis_avg_TE=mean(matsisters_yr,na.rm=T),
+         excess_cfemales_avg_TE=mean(excess_cfemales_yr,na.rm=T),
+         age_avg_TE=mean(age_chrono,na.rm=T)) %>% 
+  ungroup() %>% 
+  group_by(sname,sex,birth,statdate,matured,resid_avg_TE,slope_covTE,mstatus,age_matured,matsis_avg_TE,hybridscore,excess_cfemales_avg_TE,rain_avg_TE,mompresent_mat,lowMatRank,age_avg_TE,genome_wide_anubis_ancestry) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  mutate(time=case_when(is.na(matured)~(statdate-birth)/365.25,
+                       !is.na(matured)~(matured-birth)/365.25)) %>% 
+  mutate(event=case_when(is.na(matured)~0,
+                         !is.na(matured)~1)) %>% 
+  mutate(type_cov_accel=case_when(resid_avg_TE>median(resid_avg_TE)~"old",
+                            resid_avg_TE<median(resid_avg_TE)~"young",
+                            resid_avg_TE==median(resid_avg_TE)~"young"),
+         type_cov_pace=case_when(slope_covTE>median(slope_covTE)~"faster",
+                            slope_covTE<median(slope_covTE)~"slower",
+                            slope_covTE==median(slope_covTE)~"faster"))
+```
+
+### Plots
+```{r}
+survfit.cov.PriorTE<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_PriorTE)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorTE, 
+                 data = Summary_PriorTE, 
+                 fun="event",
+                 title = "TE Curves for Covariate Corrected Residuals",
+                 ylab = "Probability of TE",
+                 xlab = "Time in Years",
+                 break.x.by = 0.5,
+                 xlim=c(2.5,8),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Microbial cov",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 5.4, linetype = "solid", color="red")
+p.coxph.cov
+
+survfit.cov.PriorTE<-survfit(Surv(time,event)~type_cov_pace,
+                          data=Summary_PriorTE)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorTE, 
+                 data = Summary_PriorTE, 
+                 fun="event",
+                 title = "TE Curves for Slope Prior to Milestone",
+                 ylab = "Probability of TE",
+                 xlab = "Time in Years",
+                 break.x.by = 0.5,
+                 xlim=c(2.5,8),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Pace of Aging",  ### Change legend titles
+                 legend.labs = c("Fast", "Slow"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 5.4, linetype = "solid", color="red")
+p.coxph.cov
+```
+
+### Models {.tabset}
+```{r}
+coxph.TE.cov<-coxph(Surv(time,event)~resid_avg_TE
+                    #+slope_covTE
+                    #+age_avg_TE
+                    +mompresent_mat
+                   # +matsis_avg_TE
+                    +lowMatRank
+                    +excess_cfemales_avg_TE
+                    +rain_avg_TE
+                    +genome_wide_anubis_ancestry
+                    ,data=Summary_PriorTE)
+sink("model.txt")
+summary(coxph.TE.cov);cox.zph(coxph.TE.cov)
+sink()
+ggforest(coxph.TE.cov,data=Summary_PriorTE,
+                       main="TE Covariates Prior to Milestone")
+
+```
+
+# Dispersal {.tabset .tabset-pills}
+## Prior to Dispersal {.tabset}
+### Data
+```{r}
+PriorDisp<-PredLifeCov_M %>%  
+  filter(case_when(!is.na(dispersed)&dispconfidence>=3&
+                     dispersed>min(metadata_all$collection_date)~age_chrono<dispersed,
+                   is.na(dispersed)&(status==0|status==2|status==3)~
+                     age_chrono<max(age_dispersed,na.rm = T))) %>% 
+  group_by(sname) %>% 
+  mutate(rain_avg_Disp=mean(rain_yr,na.rm=T),
+         matsis_avg_Disp=mean(matsisters_yr,na.rm=T),
+         excess_cfemales_avg_Disp=mean(excess_cfemales_yr,na.rm=T),
+         age_avg_Disp=mean(age_chrono)) %>% 
+  ungroup() %>% drop_na(hydroyear)
+
+PriorDisp$resid_cov<-resid(lmer(age_mb~age_chrono+ 
+                                  avg_month_maxtemp+
+                                  sum_month_rain+
+                                  season+
+                                  (1|collect_grp)+
+                                  (1|hydroyear),
+                                data=PriorDisp,
+                                control=lmerControl(optCtrl=list(maxfun=2000))))
+
+filterPriorDisp<-PriorDisp %>%  
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% filter(count>=3)
+PriorDisp<-PriorDisp %>% 
+  filter(sname %in% filterPriorDisp$sname)
+
+m.slope<-lmer(age_mb~age_chrono+ 
+                avg_month_maxtemp+
+                sum_month_rain+
+                season+
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),
+              data=PriorDisp,
+              control=lmerControl(optCtrl=list(maxfun=2000)))
+
+slope_M<-coef(m.slope)$sname %>% 
+  rename(slope_covDisp=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_covDisp)
+
+Summary_PriorDisp<-PriorDisp %>% 
+  left_join(slope_M,by="sname") %>% 
+  group_by(sname) %>% 
+  mutate(resid_avg_Disp=mean(resid_cov,na.rm=T)) %>% 
+  ungroup() %>% 
+  group_by(sname,birth,statdate,resid_avg_Disp,slope_covDisp,dispersed,dispconfidence,age_dispersed,hybridscore,rain_avg_Disp,matsis_avg_Disp,excess_cfemales_avg_Disp,lowMatRank,mompresent_disp,age_avg_Disp,genome_wide_anubis_ancestry) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  mutate(time=case_when(is.na(dispersed)~(statdate-birth)/365.25,
+                       !is.na(dispersed)~(dispersed-birth)/365.25),
+         event=case_when(is.na(dispersed)|(dispconfidence<3)~0,
+                         !is.na(dispersed)&(dispconfidence>=3)~1),
+         type_cov_accel=case_when(resid_avg_Disp>median(resid_avg_Disp)~"old",
+                            resid_avg_Disp<median(resid_avg_Disp)~"young",
+                            resid_avg_Disp==median(resid_avg_Disp)~"young"),
+         type_cov_pace=case_when(slope_covDisp>median(slope_covDisp)~"faster",
+                            slope_covDisp<median(slope_covDisp)~"slower",
+                            slope_covDisp==median(slope_covDisp)~"faster")) 
+#saveRDS(Summary_PriorDisp,"../out/DataForFigures/dispersal_prior_linear.rds")
+```
+
+### Plots
+```{r}
+survfit.cov.PriorDisp<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_PriorDisp)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorDisp, 
+                 data = Summary_PriorDisp, 
+                 fun="event",
+                 title = "Dispersal Curves for Age Accel Prior to Milestone",
+                 ylab = "Probability of Dispersal",
+                 xlab = "Time in Years",
+                 break.x.by = 1,
+                 xlim=c(2.5,14),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 7.47, linetype = "solid", color="red")
+p.coxph.cov
+
+```
+
+### Models {.tabset .tabset-pills}
+```{r}
+coxph.Disp.cov<-coxph(Surv(time,event)~resid_avg_Disp
+                     # +slope_covDisp
+                    #  +age_avg_Disp
+                      +mompresent_disp
+                      +matsis_avg_Disp
+                      +lowMatRank
+                      #+excess_cfemales_avg_Disp
+                      +rain_avg_Disp
+                      #+genome_wide_anubis_ancestry
+                      ,data=Summary_PriorDisp)
+sink("model.txt")
+summary(coxph.Disp.cov);cox.zph(coxph.Disp.cov)
+sink()
+ggforest(coxph.Disp.cov,data=Summary_PriorDisp,
+         main="Dispersal Covariates Prior to Milestone")
+
+```
+
+# Male Rank Attainment {.tabset .tabset-pills}
+## Prior to Rank Attainment {.tabset}
+### Data
+```{r}
+PriorRank<-PredLifeCov_M %>%  
+  filter(case_when(!is.na(ranked)&rstatus=="O"&
+                     ranked>min(metadata_all$collection_date)~age_chrono<ranked,
+                   is.na(ranked)&(status==0|status==2|status==3)~
+                     age_chrono<max(metadata_all$age_ranked,na.rm = T))) %>% 
+  group_by(sname) %>% 
+  mutate(rain_avg_Rank=mean(rain_yr,na.rm=T),
+         matsis_avg_Rank=mean(matsisters_yr,na.rm=T),
+         excess_cfemales_avg_Rank=mean(excess_cfemales_yr,na.rm=T),
+         age_avg_life=mean(age_chrono)) %>% 
+  ungroup() %>% drop_na(hydroyear)
+PriorRank$resid_cov<-resid(lmer(age_mb~age_chrono+ 
+                                  avg_month_maxtemp+
+                                  sum_month_rain+
+                                  season+
+                                  (1|collect_grp)+
+                                  (1|hydroyear),
+                                data=PriorRank,
+                                control=lmerControl(optCtrl=list(maxfun=2000))))
+
+filterPriorRank<-PriorRank %>%  
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% filter(count>=3)
+PriorRank<-PriorRank %>% 
+  filter(sname %in% filterPriorRank$sname)
+
+m.slope<-lmer(age_mb~age_chrono+ 
+                avg_month_maxtemp+
+                sum_month_rain+
+                season+
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),
+              data=PriorRank,
+              control=lmerControl(optCtrl=list(maxfun=2000)))
+
+slope_M<-coef(m.slope)$sname %>% 
+  rename(slope_covRank=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname, slope_covRank)
+
+Summary_PriorRank<-PriorRank %>% 
+  left_join(slope_M,by="sname") %>% 
+  group_by(sname) %>% 
+  mutate(resid_avg_Rank=mean(resid_cov)) %>% 
+  ungroup() %>% 
+  group_by(sname,sex,birth,resid_avg_Rank,slope_covRank,statdate,ranked,rstatus,age_ranked,hybridscore,rain_avg_Rank,excess_cfemales_avg_Rank,matsis_avg_Rank,mompresent_rank,lowMatRank,age_avg_life,genome_wide_anubis_ancestry) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  mutate(time=case_when(is.na(ranked)~(statdate-birth)/365.25,
+                       !is.na(ranked)~(ranked-birth)/365.25),
+         event=case_when(is.na(ranked)~0,
+                         !is.na(ranked)~1),
+         type_cov_accel=case_when(resid_avg_Rank>median(resid_avg_Rank)~"old",
+                            resid_avg_Rank<median(resid_avg_Rank)~"young",
+                            resid_avg_Rank==median(resid_avg_Rank)~"old"),
+         type_cov_pace=case_when(slope_covRank>median(slope_covRank)~"faster",
+                            slope_covRank<median(slope_covRank)~"slower",
+                            slope_covRank==median(slope_covRank)~"faster"))
+
+#saveRDS(Summary_PriorRank,"../out/DataForFigures/rankattainment_males_prior_linear_2022.rds")
+```
+
+### Plots
+```{r}
+survfit.cov.PriorRank<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_PriorRank)
+p.coxph.cov<-ggsurvplot(survfit.cov.PriorRank, 
+                 data = Summary_PriorRank, 
+                 fun="event",
+                 title = "Rank Attainment Curves for Age Accel Prior to Milestone",
+                 ylab = "Probability of Rank Attainment",
+                 xlab = "Time in Years",
+                 break.x.by = 0.5,
+                 xlim=c(4,10),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Microbial cov",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov$plot<-p.coxph.cov$plot+geom_vline(xintercept = 7.38, linetype = "solid", color="red")
+p.coxph.cov
+```
+
+### Models {.tabset .tabset-pills}
+```{r}
+coxph.Rank.cov<-coxph(Surv(time,event)~resid_avg_Rank
+                     # +slope_covRank
+                     # +age_avg_life
+                      +mompresent_rank
+                      +matsis_avg_Rank
+                      +lowMatRank
+                      +excess_cfemales_avg_Rank
+                      +rain_avg_Rank
+                      #+genome_wide_anubis_ancestry
+                      ,data=Summary_PriorRank)
+sink("model.txt")
+summary(coxph.Rank.cov);cox.zph(coxph.Rank.cov)
+sink()
+ggforest(coxph.Rank.cov,data=Summary_PriorRank,
+         main="Rank Covariates Prior to Milestone")
+```
+
+# Survival {.tabset .tabset-pills}
+Age_death was calculated as the statdate-birth when status=1 and the statdate was between the start of sampling (~2000) and within a year of the end of sampling (~2015).
+```{r}
+EA<-readRDS("../../4_machinelearning/out/ea_dataset.rds") %>% select(-birth,-matgrp,-lowMatRank,-cumulative_adversity) 
+
+SurvCov<-rbind(PredLifeCov_F,PredLifeCov_M) %>% 
+  left_join(EA,by=c("sname","sex")) %>% 
+  group_by(sname) %>% 
+  mutate(resid_avg_life=mean(resid_life,na.rm=T)) %>% 
+  ungroup() %>% 
+  arrange(DADA_id) %>% 
+  mutate(age_stat=as.numeric((statdate-birth)/365.25)) %>% 
+  mutate(age_death=ifelse(status==1,age_stat,NA)) %>% 
+  mutate(DeathAsJuv=case_when(age_death<=4~TRUE,
+                              age_death>4|is.na(age_death)~FALSE))
+                              #is.na(age_death)&age_stat<4~"CENSORED")) <- 0 cases of this
+```
+
+## Juvenile Survival {.tabset .tabset-pills}
+### Females {.tabset}
+#### Data
+```{r}
+JuvSurv<-SurvCov %>% 
+  filter(age_chrono<=4&status<=3&sex=="F")
+
+JuvSurv$resid_cov<-resid(lmer(age_mb~age_chrono
+                              +avg_month_maxtemp
+                              +sum_month_rain
+                              +season
+                              +(1|collect_grp)
+                              +(1|hydroyear)
+                              ,data=JuvSurv))
+
+filter_JuvSurv<-JuvSurv %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+JuvSurv<-JuvSurv %>% filter(sname %in% filter_JuvSurv$sname)
+
+m.slope1<-lmer(age_mb~age_chrono+
+                avg_month_maxtemp+
+                sum_month_rain+ 
+                season+ 
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),data=JuvSurv)
+slope_M1<-coef(m.slope1)$sname %>% 
+  rename(intercept_1=`(Intercept)`,
+    slope_prior4_1=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname,slope_prior4_1) 
+
+Summary_JuvSurv<-JuvSurv%>% 
+  left_join(slope_M1,by="sname") %>%  
+  group_by(sname) %>% 
+  mutate(resid_avg_life=mean(resid_cov,na.rm=T),
+         age_avg_life=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(time=case_when(DeathAsJuv=="FALSE"~4,
+                        DeathAsJuv=="TRUE"~as.numeric((statdate-birth)/365.25)),
+         event=case_when(is.na(age_death)~0,
+                         !is.na(age_death)&DeathAsJuv=="FALSE"~0,
+                         !is.na(age_death)&DeathAsJuv=="TRUE"~1),
+         type_accel=case_when(resid_avg_life>median(resid_avg_life)~"old",
+                             resid_avg_life<median(resid_avg_life)~"young",
+                             resid_avg_life==median(resid_avg_life)~"young"),
+         type_pace=case_when(slope_prior4_1>median(slope_prior4_1)~"faster",
+                               slope_prior4_1<median(slope_prior4_1)~"slower",
+                               slope_prior4_1==median(slope_prior4_1)~"slower")) %>% 
+  group_by(sname,sex,age_death,DeathAsJuv,resid_avg_life,slope_prior4_1,maternal_loss,sibling,drought,highGrpSize,lowMatSCI,lowMatRank,cumulative_adversity,time,event,type_accel,type_pace,age_avg_life) %>% 
+  summarise() %>% 
+  ungroup()
+```
+
+#### Plots
+```{r}
+survfit.cov.lifespan<-survfit(Surv(time,event)~type_accel,
+                          data=Summary_JuvSurv)
+p.coxph.cov<-ggsurvplot(survfit.cov.lifespan, 
+                 data = Summary_JuvSurv, 
+                 #fun="event",
+                 title = "Female Juv Survival Curves for Age Acceleration",
+                 ylab = "Probability of Survival",
+                 xlab = "Time in Years",
+                 break.x.by = .5,
+                 xlim=c(0,4),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov
+```
+
+#### Models {.tabset}
+```{r}
+coxphm.time.cov<-coxph(Surv(time, event)~resid_avg_life
+                    #   +slope_prior4_1
+                       #+age_avg_life
+                       +maternal_loss
+                       +sibling
+                       +drought
+                       +highGrpSize
+                       +lowMatSCI
+                       +lowMatRank
+                       ,data=Summary_JuvSurv)
+summary(coxphm.time.cov);cox.zph(coxphm.time.cov)
+ggforest(coxphm.time.cov,data=Summary_JuvSurv,
+         main="Juvenile Survival Covariates")
+coxphm.time.cov2<-coxph(Surv(time, event)~resid_avg_life
+                     #   +slope_prior4_1
+                        #+age_avg_life
+                        +cumulative_adversity
+                        ,data=Summary_JuvSurv)
+sink("model.txt")
+summary(coxphm.time.cov2);cox.zph(coxphm.time.cov2)
+sink()
+ggforest(coxphm.time.cov2,data=Summary_JuvSurv,
+         main="Juvenile Survival Covariates")
+```
+
+### Males {.tabset}
+#### Data
+```{r}
+JuvSurv<-SurvCov %>% 
+  filter(age_chrono<=4&status<=3&sex=="M") %>% drop_na(hydroyear)
+
+JuvSurv$resid_cov<-resid(lmer(age_mb~age_chrono
+                              +avg_month_maxtemp
+                              +sum_month_rain
+                              +season
+                              +(1|collect_grp)
+                              +(1|hydroyear)
+                              ,data=JuvSurv))
+
+filter_JuvSurv<-JuvSurv %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+JuvSurv<-JuvSurv %>% filter(sname %in% filter_JuvSurv$sname)
+
+m.slope1<-lmer(age_mb~age_chrono+
+                avg_month_maxtemp+
+                sum_month_rain+ 
+                season+ 
+                (1|collect_grp)+
+                (1|hydroyear)+
+                (1+age_chrono|sname),data=JuvSurv)
+slope_M1<-coef(m.slope1)$sname %>% 
+  rename(intercept_1=`(Intercept)`,
+    slope_prior4_1=age_chrono) %>% 
+  rownames_to_column("sname") %>% 
+  select(sname,slope_prior4_1) 
+
+Summary_JuvSurv<-JuvSurv%>% 
+  left_join(slope_M1,by="sname") %>%  
+  group_by(sname) %>% 
+  mutate(resid_avg_life=mean(resid_cov,na.rm=T),
+         age_avg_life=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(time=case_when(DeathAsJuv=="FALSE"~4,
+                        DeathAsJuv=="TRUE"~as.numeric((statdate-birth)/365.25)),
+         event=case_when(is.na(age_death)~0,
+                         !is.na(age_death)&DeathAsJuv=="FALSE"~0,
+                         !is.na(age_death)&DeathAsJuv=="TRUE"~1),
+         type_accel=case_when(resid_avg_life>median(resid_avg_life)~"old",
+                             resid_avg_life<median(resid_avg_life)~"young",
+                             resid_avg_life==median(resid_avg_life)~"young"),
+         type_pace=case_when(slope_prior4_1>median(slope_prior4_1)~"faster",
+                               slope_prior4_1<median(slope_prior4_1)~"slower",
+                               slope_prior4_1==median(slope_prior4_1)~"slower")) %>% 
+  group_by(sname,sex,age_death,DeathAsJuv,resid_avg_life,slope_prior4_1,maternal_loss,sibling,drought,highGrpSize,lowMatSCI,lowMatRank,cumulative_adversity,time,event,type_accel,type_pace,age_avg_life) %>% 
+  summarise() %>% 
+  ungroup()
+```
+
+#### Plots
+```{r}
+survfit.cov.lifespan<-survfit(Surv(time,event)~type_accel,
+                          data=Summary_JuvSurv)
+p.coxph.cov<-ggsurvplot(survfit.cov.lifespan, 
+                 data = Summary_JuvSurv, 
+                 #fun="event",
+                 title = "Juv Survival Attainment Curves for Age Acceleration",
+                 ylab = "Probability of Survival",
+                 xlab = "Time in Years",
+                 break.x.by = .5,
+                 xlim=c(0,4),
+                 conf.int = T,
+                 pval = F, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov
+```
+
+#### Models {.tabset}
+```{r}
+coxphm.time.cov<-coxph(Surv(time, event)~resid_avg_life
+                      # +slope_prior4_1
+                       +age_avg_life
+                       +maternal_loss
+                       +sibling
+                       +drought
+                       +highGrpSize
+                       +lowMatSCI
+                       +lowMatRank
+                       ,data=Summary_JuvSurv)
+summary(coxphm.time.cov);cox.zph(coxphm.time.cov)
+ggforest(coxphm.time.cov,data=Summary_JuvSurv,
+         main="Juvenile Survival Covariates")
+coxphm.time.cov2<-coxph(Surv(time, event)~resid_avg_life
+                       # +slope_prior4_1
+                        +cumulative_adversity
+                        ,data=Summary_JuvSurv)
+sink("model.txt")
+summary(coxphm.time.cov2);cox.zph(coxphm.time.cov2)
+sink()
+ggforest(coxphm.time.cov2,data=Summary_JuvSurv,
+         main="Juvenile Survival Covariates")
+```
+
+## Adult Female Survival {.tabset .tabset-pills}
+### Data
+```{r}
+SurvCovAdultF<-SurvCov %>% 
+  filter(sex=="F",age_stat>4) #just removing those that died or disappeared before 4
+
+filter_ADFSurv<-SurvCovAdultF %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+
+ADFSurv<-SurvCovAdultF %>% filter(sname %in% filter_ADFSurv$sname)
+
+Summary_ADFSurv<-ADFSurv %>% 
+  group_by(sname) %>% 
+  mutate(avg_agec=mean(age_chrono)) %>%
+  mutate(slope_over_age=slope_life_1step/avg_agec) %>% 
+  ungroup() %>% 
+  mutate(time=age_stat,
+         event=case_when(is.na(age_death)~0,
+                         !is.na(age_death)&DeathAsJuv=="FALSE"~1),
+         type_cov_accel=case_when(resid_avg_life>median(resid_avg_life)~"old",
+                            resid_avg_life<median(resid_avg_life)~"young",
+                            resid_avg_life==median(resid_avg_life)~"young"),
+         type_cov_pace=case_when(slope_life_1step>median(slope_life_1step)~"Faster",
+                            slope_life_1step<median(slope_life_1step)~"Slower",
+                            slope_life_1step==median(slope_life_1step)~"Slower"),
+         type_cov_pace2=case_when(slope_over_age>median(slope_over_age)~"Faster",
+                            slope_over_age<median(slope_over_age)~"Slower",
+                            slope_over_age==median(slope_over_age)~"Slower")) %>%
+  group_by(sname,age_death,age_stat,resid_avg_life,slope_life_1step,slope_over_age,time,event,type_cov_accel,type_cov_pace,type_cov_pace2,DeathAsJuv,avg_agec)%>%
+  summarise(rain_lifeavg=mean(rain_1yrprior,na.rm=T)) %>% 
+  ungroup()
+
+SCI<-readRDS("../../1_data/out/sci2.RDS") %>% 
+  group_by(sname) %>% 
+  summarise(avg_SCI_F=mean(SCI_F,na.rm=T),
+            avg_SCI_M=mean(SCI_M,na.rm=T)) %>% 
+  ungroup() 
+
+SCI$avg_SCI_M<-ifelse(SCI$avg_SCI_M == 'NaN', NA, SCI$avg_SCI_M)
+SCI$avg_SCI_F<-ifelse(SCI$avg_SCI_F == 'NaN', NA, SCI$avg_SCI_F)
+
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>% 
+  group_by(sname) %>% 
+  summarise(avg_ordrank=mean(ordrank,na.rm=T),
+         avg_proprank=mean(proprank,na.rm=T)) %>% 
+  ungroup()
+
+EA<-readRDS("../../4_machinelearning/out/ea_dataset.rds") %>% select(-birth,-matgrp) 
+
+Summary_ADFSurvCov<-Summary_ADFSurv %>% 
+  left_join(ranks,by=c("sname")) %>% 
+  left_join(SCI,by=c("sname")) %>% 
+  left_join(EA,by="sname") 
+
+saveRDS(Summary_ADFSurvCov,"../out/Summary_ADFSurvivalCovariates.rds")
+```
+
+### Plots
+```{r}
+survfit.cov.lifespan<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_ADFSurvCov)
+p.coxph.cov<-ggsurvplot(survfit.cov.lifespan, 
+                 data = Summary_ADFSurvCov, 
+                 #fun="event",
+                 title = "ADF Survival Curves for Lifespan Age Accel",
+                 ylab = "Probability of Survival",
+                 xlab = "Time in Years",
+                 break.x.by = 5,
+                 xlim=c(4,30),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov
+```
+```{r}
+Summary_ADFSurvCov2<-ADFSurv %>% 
+  left_join(ranks,by=c("sname")) %>% 
+  group_by(sname,slope_life_1step,avg_proprank) %>% 
+  summarise(avg_agec=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(slope_over_age=slope_life_1step/avg_agec)
+ggplot(data=Summary_ADFSurvCov2,
+       aes(x=avg_agec,y=slope_life_1step))+
+  geom_point(aes(color=avg_proprank))+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging")
+ggplot(data=Summary_ADFSurvCov2,
+       aes(x=avg_agec,y=slope_over_age))+
+  geom_point(aes(color=avg_proprank))+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging Normalized by Mean Chronological Age")
+ggplot(data=Summary_ADFSurvCov2,aes(x=slope_over_age))+
+  geom_histogram()+
+  xlab("Individual's Pace of Aging Divided by Mean Chronological Age")
+```
+
+### Models
+```{r}
+coxph.Surv.cov<-coxph(Surv(time,event)~resid_avg_life
+                      #+slope_life_1step
+                      #+avg_agec
+                      +maternal_loss
+                      +sibling
+                      +drought
+                      +highGrpSize
+                      +lowMatSCI
+                      +lowMatRank
+                      #+rain_lifeavg
+                      +avg_SCI_F
+                      +avg_SCI_M
+                      +avg_proprank
+                      ,data=Summary_ADFSurvCov)
+summary(coxph.Surv.cov);cox.zph(coxph.Surv.cov)
+ggforest(coxph.Surv.cov,data=Summary_ADFSurvCov,
+         main="Adult Female Survival Covariates")
+coxph.Surv.cov2<-coxph(Surv(time,event)~resid_avg_life
+                      # +slope_life_1step
+                       #+avg_agec
+                       +cumulative_adversity
+                       #+rain_lifeavg
+                       +avg_SCI_F
+                       +avg_SCI_M
+                       +avg_proprank
+                       ,data=Summary_ADFSurvCov)
+summary(coxph.Surv.cov2);cox.zph(coxph.Surv.cov2)
+ggforest(coxph.Surv.cov2,data=Summary_ADFSurvCov,
+         main="Adult Female Survival Covariates") 
+
+coxph.Surv.cov3<-coxph(Surv(time,event)~resid_avg_life
+                      #+slope_over_age
+                     # +avg_agec
+                      +maternal_loss
+                      +sibling
+                      +drought
+                      +highGrpSize
+                      +lowMatSCI
+                      +lowMatRank
+                      #+rain_lifeavg
+                      +avg_SCI_F
+                      +avg_SCI_M
+                      +avg_proprank
+                      ,data=Summary_ADFSurvCov)
+summary(coxph.Surv.cov3);cox.zph(coxph.Surv.cov3)
+ggforest(coxph.Surv.cov3,data=Summary_ADFSurvCov,
+         main="Adult Female Survival Covariates")
+coxph.Surv.cov4<-coxph(Surv(time,event)~resid_avg_life
+                      # +slope_over_age
+                       #+avg_agec
+                       +cumulative_adversity
+                       #+rain_lifeavg
+                       +avg_SCI_F
+                       +avg_SCI_M
+                       +avg_proprank
+                       ,data=Summary_ADFSurvCov)
+sink("model.txt")
+summary(coxph.Surv.cov4);cox.zph(coxph.Surv.cov4)
+sink()
+ggforest(coxph.Surv.cov4,data=Summary_ADFSurvCov,
+         main="Adult Female Survival Covariates") 
+```
+
+
+## Adult Male Survival {.tabset .tabset-pills}
+### Data
+```{r}
+SurvCovAdultM<-SurvCov %>% 
+  filter(sex=="M",age_stat>4) #just removing those that died or disappeared before 4
+
+filter_ADMSurv<-SurvCovAdultM %>% 
+  group_by(sname) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  filter(count>=3)
+
+ADMSurv<-SurvCovAdultM %>% filter(sname %in% filter_ADMSurv$sname)
+
+Summary_ADMSurv<-ADMSurv %>% 
+  group_by(sname) %>% 
+  mutate(avg_agec=mean(age_chrono)) %>%
+  mutate(slope_over_age=slope_life_1step/avg_agec) %>% 
+  ungroup() %>% 
+  mutate(time=age_stat,
+         event=case_when(is.na(age_death)~0,
+                         !is.na(age_death)&DeathAsJuv=="FALSE"~1),
+         type_cov_accel=case_when(resid_avg_life>median(resid_avg_life)~"old",
+                            resid_avg_life<median(resid_avg_life)~"young",
+                            resid_avg_life==median(resid_avg_life)~"young"),
+         type_cov_pace=case_when(slope_life_1step>median(slope_life_1step)~"Faster",
+                            slope_life_1step<median(slope_life_1step)~"Slower",
+                            slope_life_1step==median(slope_life_1step)~"Slower"),
+         type_cov_pace2=case_when(slope_over_age>median(slope_over_age)~"Faster",
+                            slope_over_age<median(slope_over_age)~"Slower",
+                            slope_over_age==median(slope_over_age)~"Slower")) %>%
+  group_by(sname,age_death,age_stat,resid_avg_life,slope_life_1step,slope_over_age,time,event,type_cov_accel,type_cov_pace,type_cov_pace2,DeathAsJuv,avg_agec)%>%
+  summarise(rain_lifeavg=mean(rain_1yrprior,na.rm=T)) %>% 
+  ungroup()
+
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>% 
+  group_by(sname) %>% 
+  summarise(avg_ordrank=mean(ordrank,na.rm=T),
+         avg_proprank=mean(proprank,na.rm=T)) %>% 
+  ungroup()
+
+EA<-readRDS("../../4_machinelearning/out/ea_dataset.rds") %>% select(-birth,-matgrp) 
+
+Summary_ADMSurvCov<-Summary_ADMSurv %>% 
+  left_join(ranks,by=c("sname")) %>% 
+  left_join(EA,by="sname") 
+```
+
+### Plots
+```{r}
+survfit.cov.lifespan<-survfit(Surv(time,event)~type_cov_accel,
+                          data=Summary_ADMSurvCov)
+p.coxph.cov<-ggsurvplot(survfit.cov.lifespan, 
+                 data = Summary_ADMSurvCov, 
+                 #fun="event",
+                 title = "ADM Survival Curves for Lifespan Age Accel",
+                 ylab = "Probability of Survival",
+                 xlab = "Time in Years",
+                 break.x.by = 5,
+                 xlim=c(4,30),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Age Acceleration",  ### Change legend titles
+                 legend.labs = c("Old", "Young"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov
+survfit.cov.lifespan<-survfit(Surv(time,event)~type_cov_pace,
+                          data=Summary_ADMSurvCov)
+p.coxph.cov<-ggsurvplot(survfit.cov.lifespan, 
+                 data = Summary_ADMSurvCov, 
+                 #fun="event",
+                 title = "ADM Survival Curves for Lifespan Pace of Aging",
+                 ylab = "Probability of Survival",
+                 xlab = "Time in Years",
+                 break.x.by = 1,
+                 xlim=c(4,30),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Pace of Aging",  ### Change legend titles
+                 legend.labs = c("Faster", "Slower"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov
+
+survfit.cov.lifespan<-survfit(Surv(time,event)~type_cov_pace2,
+                          data=Summary_ADMSurvCov)
+p.coxph.cov<-ggsurvplot(survfit.cov.lifespan, 
+                 data = Summary_ADMSurvCov, 
+                 #fun="event",
+                 title = "ADM Survival Curves for Lifespan Pace of Aging2",
+                 ylab = "Probability of Survival",
+                 xlab = "Time in Years",
+                 break.x.by = 1,
+                 xlim=c(4,30),
+                 conf.int = T,
+                 pval = TRUE, pval.method = F,    ### Add p-value &  method name
+                 surv.median.line = "hv",         ### Add median survival lines
+                 legend.title = "Pace of Aging",  ### Change legend titles
+                 legend.labs = c("Faster", "Slower"), ### Change legend labels
+                 palette = "nejm",         ### Use JCO journal color palette
+                 risk.table = F,                  ### Add No at risk table
+                 cumevents = F,                   ### Add cumulative No of events table
+                 tables.height = 0.15,            ### Specify tables height
+                 tables.theme = theme_cleantable(),### Clean theme for tables
+                 tables.y.text = FALSE            ### Hide tables y axis text
+                 )
+p.coxph.cov
+
+Summary_ADMSurvCov2<-ADMSurv %>% 
+  left_join(ranks,by=c("sname")) %>% 
+  group_by(sname,slope_life_1step,avg_ordrank) %>% 
+  summarise(avg_agec=mean(age_chrono)) %>% 
+  ungroup() %>% 
+  mutate(slope_over_age=slope_life_1step/avg_agec)
+ggplot(data=Summary_ADMSurvCov2,
+       aes(x=avg_agec,y=slope_life_1step))+
+  geom_point(aes(color=avg_ordrank))+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging")
+ggplot(data=Summary_ADMSurvCov2,
+       aes(x=avg_agec,y=slope_over_age))+
+  geom_point(aes(color=avg_ordrank))+
+  xlab("Individual's Mean Chronological Age")+
+  ylab("Individual's Pace of Aging Normalized by Mean Chronological Age")
+ggplot(data=Summary_ADMSurvCov2,aes(x=slope_over_age))+
+  geom_histogram()+
+  xlab("Individual's Pace of Aging Divided by Mean Chronological Age")
+```
+
+### Models
+```{r}
+coxph.Surv.cov<-coxph(Surv(time,event)~resid_avg_life
+                      +slope_life_1step
+                      +avg_agec
+                      +maternal_loss
+                      +sibling
+                      +drought
+                      +highGrpSize
+                      +lowMatSCI
+                      +lowMatRank
+                      +avg_ordrank
+                      ,data=Summary_ADMSurvCov)
+summary(coxph.Surv.cov);cox.zph(coxph.Surv.cov)
+ggforest(coxph.Surv.cov,data=Summary_ADMSurvCov,
+         main="Adult Male Survival Covariates")
+coxph.Surv.cov2<-coxph(Surv(time,event)~resid_avg_life
+                       +slope_life_1step
+                       +avg_agec
+                       +cumulative_adversity
+                       +avg_ordrank
+                       ,data=Summary_ADMSurvCov)
+summary(coxph.Surv.cov2);cox.zph(coxph.Surv.cov2)
+ggforest(coxph.Surv.cov2,data=Summary_ADMSurvCov,
+         main="Adult Male Survival Covariates")
+```

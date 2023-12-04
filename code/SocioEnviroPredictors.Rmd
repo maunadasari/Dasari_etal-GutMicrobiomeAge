@@ -1,0 +1,399 @@
+---
+title: "SocioEnviroPredictors_StatBreakpoint"
+author: "Mauna Dasari"
+date: "2/14/2021"
+output:
+  html_document:
+    number_sections: no
+    theme: paper
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,warning=F,message=F,cache=2)
+library(feather);library(tidyverse);library(kableExtra);library(gridExtra);
+
+library(lme4);library(lmerTest);library(mgcv);library(survival);library(survminer);
+statuses<-readRDS("../../1_data/out/statuses_updatedDec2020.rds")
+mom_ranks<-readRDS("../../1_data/out/mom_rank_updatedSep2021.rds") %>% select(sname,mom_rank)
+metadata_all<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+  rename(age_firstlivebirth=age_first_live_birth,
+         age_firstpreg=age_first_preg,
+         age_chrono=age.years) %>% 
+  mutate(age_stat=(statdate-birth)/365.25) %>% 
+  filter(collect_grp<3.0) %>% 
+  select(-plate,-statdate,-status,-mom_rank,-read_count,-richness,-ShannonH,-Simpson,-starts_with("Hill"),-ordrank,-proprank) %>% 
+  left_join(statuses,by="sname") %>% 
+  left_join(mom_ranks,by="sname") 
+```
+
+This file will use median age of sexual maturity to determine the breakpoint between phases.
+
+# What makes some animals have older looking microbiome or younger looking microbiomes?
+
+## What predicts delta age? {.tabset}
+$\Delta$age = $age_{microbial}$ - $age_{chronological}$, so if $\Delta$age is negative, that means $age_{chronological}$ > $age_{microbial}$ and the animal is microbially young for age. 
+
+### Delta Over Life {.tabset}
+````{r fig.height=10}
+grp_adf<-readRDS("../../1_data/out/collectgrpdensity_adf.rds") %>% select(sname,collect_grp,collection_date,adf_collect)
+metadata_simple<-metadata_all %>% select(DADA_id,sname,collection_date,season,collect_grp,rain_1yrprior) %>% 
+  left_join(grp_adf, by=c("sname", "collection_date", "collect_grp")) %>% 
+  mutate(collect_grp=as.factor(collect_grp)) %>% distinct()
+
+monthly_temp_rain<-readRDS("../../4_machinelearning/out/monthly_temp_rain_hydroyear.rds") %>% 
+  distinct() %>% 
+  mutate(hydroyear=as.factor(hydroyear)) 
+
+H.PredLife_raw<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds") 
+
+PredLifeCov<-H.PredLife_raw %>% 
+  select(-c(testID,delta_abs,starts_with("resid"))) %>% 
+  left_join(metadata_simple, by=c("DADA_id","sname")) %>% 
+  left_join(monthly_temp_rain,by=c("sname","collection_date")) 
+PredLifeCov$collect_month<-as.factor(PredLifeCov$collect_month)
+#saveRDS(PredLifeCov,"../out/GaussianProcessModeling/out/PredictedAge_EnviroCov.rds")
+
+DSI<-readRDS("../../4_machinelearning/out/metadata_with_DSI.rds") %>% 
+  select(DADA_id,sname,collect_grp,collection_date, DSI_F,DSI_M)
+DSI$collect_grp<-as.factor(DSI$collect_grp)
+
+EA_raw<-read.csv("../../4_machinelearning/in/ea_dataset_for_mauna.csv",header = T) %>% select(-X) 
+EA<-EA_raw %>% 
+  filter(included_cases=="TRUE") %>% 
+  mutate(highGrpSize=case_when(group_size>=quantile(EA_raw$group_size, probs=0.75, na.rm=TRUE)~T,
+                           group_size<quantile(EA_raw$group_size, probs=0.75, na.rm=TRUE)~F),
+         lowMatSCI=case_when(maternal_SCI_F<=quantile(EA_raw$maternal_SCI_F, probs=0.25, na.rm=TRUE)~T,
+                             maternal_SCI_F>quantile(EA_raw$maternal_SCI_F, probs=0.25, na.rm=TRUE)~F),
+         lowMatRank=case_when(maternal_rank>=quantile(EA_raw$maternal_rank, probs=0.75, na.rm=TRUE)~T,
+                           maternal_rank<quantile(EA_raw$maternal_rank, probs=0.75, na.rm=TRUE)~F)) %>% 
+  mutate(cumulative_adversity=(highGrpSize+lowMatSCI+lowMatRank+sibling+maternal_loss+drought)) %>% 
+  select(-c(mom,bstatus,status,statdate,group_size,
+            maternal_rank,maternal_SCI_F,ea_check,included_cases)) %>% 
+  mutate(EA=case_when(cumulative_adversity>=3~T,
+                      cumulative_adversity<3~F)) #%>% 
+  #select(sname,cumulative_adversity)
+#saveRDS(EA,"../out/ea_dataset_cumulativeadversity.rds") #only sname and cumulative adversity
+#saveRDS(EA,"../out/ea_dataset.rds")
+
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>% 
+  select(sname, collection_date, ordrank,proprank)
+
+PredLife.B<-PredLifeCov %>% 
+  left_join(ranks,by=c("sname","collection_date")) %>% 
+  left_join(DSI,by=c("sname","DADA_id","collection_date","collect_grp")) %>% 
+  left_join(EA,by=c("sname","sex")) 
+
+#write.csv(PredLife.B,"../out/milestone_data_verification/socioenviro_ageaccel_lifespan.csv")
+```
+
+#### Males {.tabset}
+##### Sources of Adversity {.tabset}
+```{r}
+PredLife_M.B<-PredLife.B %>% filter(sex=="M")
+model1<-lmer(delta~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+               ordrank+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_M.B)
+summary(model1)
+#check 8Nov21
+
+#for AlphaOrNo check 3Jun23
+PredLife_M.B2<-PredLife_M.B %>% 
+  mutate(AlphaOrNo=if_else(ordrank==1,"yes","no"))
+model2<-lmer(age_mb~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+ordrank+
+               AlphaOrNo+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_M.B2)
+summary(model2)
+
+
+PredLife_M_toprank<-PredLife_M.B %>% filter(ordrank<=median(ordrank,na.rm=T))
+PredLife_M_bottomrank<-PredLife_M.B %>% filter(ordrank>median(ordrank,na.rm=T))
+model3<-lmer(age_mb~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+               ordrank+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_M_toprank)
+summary(model3)
+model4<-lmer(age_mb~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+               ordrank+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_M_bottomrank)
+summary(model4)
+
+
+toyrank<-PredLife_M.B %>% 
+  select(sname, collect_grp,hydroyear,age_mb, delta,age_chrono, avg_month_maxtemp,sum_month_rain,season, maternal_loss,sibling,drought,highGrpSize,lowMatSCI,lowMatRank,ordrank) %>% 
+  mutate(age_chrono=median(age_chrono,na.rm=T),
+         avg_month_maxtemp=median(avg_month_maxtemp,na.rm=T),
+         sum_month_rain=median(sum_month_rain,na.rm=T),
+         season="wet",
+         maternal_loss=F,
+         sibling=F,
+         drought=F,
+         highGrpSize=F,
+         lowMatSCI=F,
+         lowMatRank=F) %>% 
+  mutate(ordrank=as.numeric(ordrank)) %>% 
+  mutate(ordrank_toy=case_when(ordrank==1~1,
+                               ordrank>=40~50,
+                               ordrank>1&ordrank<40~median(ordrank,na.rm=T))) %>% 
+  mutate(ordrank=as.integer(ordrank),
+         ordrank_toy=as.integer(ordrank_toy))
+# Predicts the future values
+toyrank$rankpredict<-predict(model1, newdata = toyrank,allow.new.levels=T)
+
+median(toyrank[toyrank$ordrank_toy==1,]$rankpredict,na.rm=T) #highrank, 1.332417
+
+median(toyrank[toyrank$ordrank_toy==11,]$rankpredict,na.rm=T) #medrank, 1.059418
+
+median(toyrank[toyrank$ordrank_toy==50,]$rankpredict,na.rm=T) #lowrank, 0.4263003
+```
+
+##### Cumulative Adversity {.tabset}
+```{r}
+PredLife_M.B<-PredLife.B %>% filter(sex=="M")%>% 
+  mutate(cumulative_adversity=case_when(cumulative_adversity==0~0,
+                                        cumulative_adversity==1~1,
+                                        cumulative_adversity==2~2,
+                                        cumulative_adversity>=3~3))
+model<-lmer(delta~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               cumulative_adversity+
+               ordrank+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_M.B)
+summary(model)
+#check 3Jun23
+```
+
+#### Females {.tabset}
+##### Sources of Adversity {.tabset}
+```{r}
+PredLife_F.B<-PredLife.B %>% filter(sex=="F")
+model1<-lmer(delta~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+               proprank+
+               adf_collect+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_F.B) 
+summary(model1)
+#check 3Jun23
+
+PredLife_F_toprank<-PredLife_F.B %>% filter(proprank>=median(proprank,na.rm=T))
+PredLife_F_bottomrank<-PredLife_F.B %>% filter(proprank<median(proprank,na.rm=T))
+model2<-lmer(age_mb~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+               proprank+
+               adf_collect+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_F_toprank)
+summary(model2)
+model3<-lmer(age_mb~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+               proprank+
+               adf_collect+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_F_bottomrank)
+summary(model3)
+
+
+# Creating a data frame
+toyrank<-PredLife_F.B %>% 
+  select(sname, collect_grp,hydroyear,age_mb, delta, age_chrono, avg_month_maxtemp, sum_month_rain, season, maternal_loss, sibling, drought, highGrpSize, lowMatSCI, lowMatRank, proprank, adf_collect) %>% 
+  mutate(age_chrono=median(age_chrono,na.rm=T),
+         avg_month_maxtemp=median(avg_month_maxtemp,na.rm=T),
+         sum_month_rain=median(sum_month_rain,na.rm=T),
+         season="wet",
+         maternal_loss=F,
+         sibling=F,
+         drought=F,
+         highGrpSize=F,
+         lowMatSCI=F,
+         lowMatRank=F) %>% 
+  mutate(proprank=case_when(proprank==1~1,
+                            proprank<=.1~.1,
+                            proprank<1&proprank>.1~median(proprank,na.rm=T)))
+# Predicts the future values
+toyrank$rankpredict<-predict(model1, newdata = toyrank,allow.new.levels=T)
+
+median(toyrank[toyrank$proprank==1,]$rankpredict,na.rm=T) #highrank, 0.1641621
+
+median(toyrank[toyrank$proprank==.6471,]$rankpredict,na.rm=T) #medrank, -0.2813401
+
+median(toyrank[toyrank$proprank==.1,]$rankpredict,na.rm=T) #lowrank, -1.24212
+
+```
+
+##### Cumulative Adversity {.tabset}
+```{r}
+PredLife_F.B<-PredLife.B %>% filter(sex=="F")%>% 
+  mutate(cumulative_adversity=case_when(cumulative_adversity==0~0,
+                                        cumulative_adversity==1~1,
+                                        cumulative_adversity==2~2,
+                                        cumulative_adversity>=3~3))
+model<-lmer(delta~age_chrono+
+               avg_month_maxtemp+
+               sum_month_rain+
+               season+
+               cumulative_adversity+
+               proprank+
+               adf_collect+
+               (1|sname)+
+               (1|collect_grp)+
+               (1|hydroyear),
+             data=PredLife_F.B) 
+summary(model)
+#check 3Jun23
+```
+
+# Slope over life 
+#### Males {.tabset .tabset-pills}
+##### Sources of Adversity {.tabset}
+```{r}
+model<-(lm(slope_covlife_1~
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+             avg_ordrank,
+             data=Slope_M_life))
+summary(model)
+#check 8Nov21 
+```
+
+##### Cumulative Adversity {.tabset}
+```{r}
+Slope_M_life<-Slope_M_life %>% 
+  mutate(cumulative_adversity=case_when(cumulative_adversity==0~0,
+                                        cumulative_adversity==1~1,
+                                        cumulative_adversity==2~2,
+                                        cumulative_adversity>=3~3))
+length(Slope_M_life$sname)
+model<-(lm(slope_covlife_1~
+             cumulative_adversity+
+             avg_ordrank,
+             data=Slope_M_life))
+summary(model)
+#check 8Nov21 
+```
+
+#### Females {.tabset .tabset-pills}
+##### Sources of Adversity {.tabset}
+```{r}
+model<-(lm(slope_covlife_1~
+               maternal_loss+
+               sibling+
+               drought+
+               highGrpSize+
+               lowMatSCI+
+               lowMatRank+
+             avg_proprank+avg_adf_collect,
+             data=Slope_F_life))
+summary(model); AIC(model)
+#check 8Nov21 
+
+cor(Slope_F_life$intercept_1,Slope_F_life$slope_covlife_1) #-0.8838758
+
+```
+
+##### Cumulative Adversity {.tabset}
+```{r}
+Slope_F_life<-Slope_F_life %>% 
+  mutate(cumulative_adversity=case_when(cumulative_adversity==0~0,
+                                        cumulative_adversity==1~1,
+                                        cumulative_adversity==2~2,
+                                        cumulative_adversity>=3~3))
+
+model<-(lm(slope_covlife_1~
+             cumulative_adversity+
+             avg_proprank+avg_adf_collect,
+             data=Slope_F_life))
+summary(model); AIC(model)
+#check 8Nov21 
+```

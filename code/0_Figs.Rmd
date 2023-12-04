@@ -1,0 +1,1576 @@
+---
+title: "The gut microbiome reflects host biological age in wild baboons"
+author: "Mauna R. Dasari, Kimberley E. Roche, David Jansen, Jordan Anderson, Jeanne Altmann, Susan C. Alberts, Jack A. Gilbert, Ran Blekhman, Sayan Mukherjee, Jenny Tung, Elizabeth A. Archie"
+output:
+  bookdown::word_document2: 
+    reference_docx: template.docx
+    keep_tex: true
+bibliography: ../in/AgingPaper.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,warning=F,message=F,cache=2)
+options(kableExtra.auto_format = FALSE)
+library(feather);library(tidyverse);library(mgcv);library(gridExtra);library(flextable);
+library(grid);library(patchwork);library(lme4);library(survminer);library(survival);library(officer);library(r2symbols);library(cowplot)
+
+std_border<-fp_border(color = "black", style = "solid", width = 1)
+thicc_border<-fp_border(color = "black", style = "solid", width = 2)
+```
+
+# Figure 1
+```{r sampledatadist, fig.height=6, fig.width=8, fig.cap="Longitudinal fecal samples collected for (A) female and (B) male baboons in the Amboseli ecosystem. Host age at the time of sample collection is indicated on the x-axis and individual baboons are represented on the y-axis. Each point represents a fecal sample collected from an individual baboon. The fill color of each point reflects the subject's sexual maturation state, with lighter colors reflecting samples collected prior to menarche for females and prior to testicular enlargement for males (for more information on how these milestones are measured, see Table S5.8. Plot A contains 8,245 samples from 234 individual females. Plot B contains 5,231 samples from 197 individual males."}
+#metadata file with all the EMP samples and ages
+metadata_random<-readRDS("../../4_machinelearning/out/metadata_random.rds") %>% 
+  mutate(age_matured=as.numeric((matured-birth)/365.25)) %>% 
+  filter(collect_grp<3) %>% 
+  select(DADA_id,sname,age_matured, statdate, status,birth) %>% 
+  mutate(age_end = statdate-birth) 
+
+#file with just the data that actually went into my model (too lazy to do all the filtering to the above table so I just join to this table)
+H.PredLife<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+
+#table where I count the # of samples per individual since I sort by that to make it look less jumbled
+count<-H.PredLife %>% 
+  group_by(sname) %>% 
+  summarise(sample_count=n()) %>% 
+  ungroup()
+
+#join all tables above
+H.PredLife<-H.PredLife %>% 
+  left_join(count, by="sname") %>%
+  left_join(metadata_random,by=c("DADA_id","sname")) %>% 
+  mutate(matstate = case_when((age_chrono>age_matured|age_chrono==age_matured)~'adult', #I color by matstate
+                              (age_chrono<age_matured)~"juvenile", 
+                              (is.na(age_matured))~"juvenile"), 
+         endstate = case_when(status==0~"alive", #could dd a point modifier showing how they left the population
+                              status==1~"dead",
+                              status==3~"dropped",
+                              status==2~"dispersed"))
+
+H.PredLife<-arrange(H.PredLife,sample_count) #sorting the data
+
+#female plot
+females<-ggplot(H.PredLife[H.PredLife$sex=="F",], aes(x=reorder(sname,-sample_count), y=age_chrono, fill=matstate,color=matstate)) + 
+  geom_point(pch=21,alpha=0.5)+
+  scale_fill_manual(values=c("#F2B418","#F9E09F"))+
+  scale_color_manual(values=c("#745507","#F2B418"))+
+  labs(x="Individual Baboon ID",
+        y="Age in Years",
+       title="Females")+
+  theme(legend.position = c(.9,.75), 
+        plot.margin=grid::unit(c(0,0,.25,.25),"cm"),
+        legend.key=element_blank())+
+  coord_flip(clip="off")+theme_bw()+
+  theme(axis.line.x = element_line(size=.4), 
+                     axis.line.y = element_line(size=.4), 
+                     legend.position = "none",
+                     legend.title = element_blank(),
+                     axis.title.x = element_text(color="black", size=11),
+                     axis.title.y = element_text(color="black", size=11),
+        plot.tag=element_text(size=16),
+        plot.title=element_text(size=16),
+                     axis.ticks.y=element_blank(),
+        axis.text.y=element_blank(),
+        panel.grid.major =element_blank(),
+        panel.grid.minor =element_blank())+
+  scale_y_continuous(breaks=seq(0,27,5),limits = c(0,30),expand=c(0,0))+labs(tag="A")
+
+#male plot
+males<-ggplot(H.PredLife[H.PredLife$sex=="M",], aes(x=reorder(sname,-sample_count), y=age_chrono, fill=matstate,color=matstate)) + 
+  geom_point(pch=21,alpha=0.5)+
+  scale_fill_manual(values=c("#115163","#73C2BE"))+
+  scale_color_manual(values=c("#0C3946","#38686A"))+
+  labs(x="Individual Baboon ID",
+        y="Age in Years",
+       title="Males")+
+  theme(legend.position = c(.9,.75), 
+        plot.margin=grid::unit(c(0,0,.25,.25),"cm"),
+        legend.key=element_blank())+
+  coord_flip(clip="off")+theme_bw()+
+  theme(axis.line.x = element_line(size=.4), 
+                     axis.line.y = element_line(size=.4), 
+                     legend.position = "none",
+                     legend.title = element_blank(),
+                     axis.title.x = element_text(color="black", size=14),
+                     axis.title.y = element_text(color="black", size=14),
+        plot.tag=element_text(size=16),
+        plot.title=element_text(size=16),
+                     axis.ticks.y=element_blank(),
+        axis.text.y=element_blank(),
+        panel.grid.major =element_blank(),
+        panel.grid.minor =element_blank())+
+  scale_y_continuous(breaks=seq(0,27,5),limits = c(0,30),expand=c(0,0))+labs(tag="B")
+
+#make them into a single figure and save
+grid.arrange(females, males, ncol=2)
+sampledis<-grid.arrange(females, males, ncol=2)
+ggsave(plot = sampledis, filename = "../out/Figures/SampleDistribution.png")
+```
+
+# Fig 2
+```{r fig.height=8,fig.width=16}
+relab_phylum_long<-readRDS("../../1_data/out/relabundance_long_phyla_nochl.rds") %>% 
+  filter(!grepl("Chloroplast",taxa_phyla)) %>% 
+  filter(taxa_phyla!="Bacteria_Cyanobacteria") %>% 
+  group_by(sample_ID) %>% 
+  mutate(low_quantity=if_else(rel_abundance<0.01,T,F),#grouping the ones under 1%
+         total_reads=sum(count)) %>% 
+  ungroup() %>% 
+  mutate(taxa_phyla=gsub(pattern = "_",replacement = "/",taxa_phyla))
+
+#bring in the metadata
+metadata_random<-readRDS("../../4_machinelearning/out/metadata_random.rds") %>% 
+  mutate(age_matured=as.numeric((matured-birth)/365.25)) %>% 
+  filter(collect_grp<3) %>% 
+  select(DADA_id,sname,age.years, statdate, status,birth,sex) %>% 
+  rename(age_chrono=age.years,
+         sample_ID=DADA_id) 
+
+#smoosh the tables together and group into each year by sex
+relab_phylum_long2<-relab_phylum_long %>% 
+  left_join(metadata_random,by="sample_ID") %>% 
+  drop_na() %>% 
+  mutate(age_floor=floor(age_chrono)) %>% 
+  group_by(taxa_phyla,sex,age_floor) %>% 
+  summarise(mean_relabun=mean(rel_abundance)) %>% 
+  mutate(plot_taxa = ifelse(mean_relabun<0.01,"Low Abundance Taxa (<1%)", taxa_phyla)) %>%
+  ungroup() %>% 
+  mutate(plot_taxa = ifelse(plot_taxa == "Bacteria/NA" | plot_taxa == "NA/NA", 
+                            "Unclassified Taxa", 
+                            plot_taxa)) %>% 
+  group_by(plot_taxa, sex, age_floor) %>% 
+  summarise(mean_relabun = sum(mean_relabun, na.rm = T), .groups = "drop") %>% 
+  mutate(plot_taxa=gsub("[A-z]+/","",plot_taxa)) 
+
+#females
+p2a_relabunF<-relab_phylum_long2 %>% 
+  filter(sex=="F") %>% 
+  ggplot(aes(x=age_floor,y=mean_relabun,fill=plot_taxa),width=1)+
+  geom_col(color="grey40")+
+  labs(x="Age (years)",y="Mean Relative \n Abundance",fill='Phylum',title="Females",tag="A")+
+  theme_classic()+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  scale_fill_viridis_d(option = "turbo",name=NULL)+
+ theme(axis.text = element_text(size = 32, colour = "black"),
+        axis.title=element_text(size=39),
+        legend.text = element_text(size=30),
+        plot.tag=element_text(size=44),
+        plot.title=element_text(size=42),
+        legend.position = "none");p2a_relabunF
+ggsave(plot=p2a_relabunF, filename = "../out/Figures/RelAbunPhylumF.png",width = 16, height=8, units="in",dpi=300)
+```
+```{r fig.height=8,fig.width=18}
+#males
+p2b_relabunM<-relab_phylum_long2 %>% 
+  filter(sex=="M") %>% 
+  ggplot(aes(x=age_floor,y=mean_relabun,fill=plot_taxa),width=1)+
+  geom_col(color="grey30")+
+  labs(x=NULL,y=NULL,fill='Phylum')+
+  labs(x="Age (years)",y="Mean Relative \n Abundance",fill='Phylum',title="Males",tag="B")+
+  theme_classic()+
+  scale_x_continuous(expand=c(0,0))+
+  scale_y_continuous(expand=c(0,0))+
+  scale_fill_viridis_d(option = "turbo",name=NULL)+
+  theme(axis.text = element_text(size = 32, colour = "black"),
+        axis.title=element_text(size=39),
+        legend.text = element_text(size=34),
+        plot.tag=element_text(size=44),
+        plot.title=element_text(size=42),
+        legend.position = "right",
+        legend.key.width=unit(1,"cm"));p2b_relabunM
+ggsave(plot=p2b_relabunM, filename = "../out/Figures/RelAbunPhylumM.png",width = 18, height=8, units="in",dpi=300)
+```
+``````{r fig.height=10,fig.width=35}
+library(ggpubr)
+ggarrange(p2A, p2B, ncol=2, nrow=1)   
+ggsave("../out/Figures/2AB_RelAbunPhylum.png")
+###
+```
+
+```{r fig.height=6,fig.width=15}
+age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_meancentered_May21.rds")
+#age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_inclASVs25to50.rds")
+colnames(age_gaussian_quad)<-gsub("_A","_linear",colnames(age_gaussian_quad));
+colnames(age_gaussian_quad)<-gsub("_B","_quad",colnames(age_gaussian_quad));
+colnames(age_gaussian_quad)<-gsub("Term","Age",colnames(age_gaussian_quad));
+
+gaussian_features<-as.data.frame(readRDS("../../4_machinelearning/out/phenotype_types.rds")) %>% 
+  mutate(Feature=as.character(phenotype_names)) %>% select(-phenotype_names)
+gaussian_features2<-gaussian_features
+gaussian_features2[gaussian_features2=="ASV"]<-"Gaussian ASV"
+
+gaussian<-age_gaussian_quad %>% 
+  left_join(gaussian_features2,by="Feature") %>% 
+  rename(Feature_Category=phenotype_type) %>% 
+  mutate_if(is.factor, as.character)%>%
+  mutate_at(vars(matches("(Estimate)|(SE)|(p_value)")), as.numeric) %>% 
+  mutate(p_linear_adj=p.adjust(p_value_linear, method="BH"),
+         p_quad_adj=p.adjust(p_value_quad, method="BH")) %>% 
+  select(-matches("Age"))
+
+binomial<-readRDS("../../5_feature-analyses/out/binomial_features_BHadjusted2_wide.rds") %>% 
+  mutate(p_linear_adj=p.adjust(p_value_linear, method="BH"),
+         p_quad_adj=p.adjust(p_value_quad, method="BH"))
+all_features<-rbind(gaussian,binomial)
+
+AllSigFeatures<-all_features %>% 
+  mutate(Significance_linear = if_else(p_linear_adj<=0.05,T,F),
+         Significance_quad = if_else(p_quad_adj<=0.05,T,F)) 
+
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="beta_diversity"]<-"Composition"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="alpha_diversity"]<-"Alpha Diversity"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="phylum"]<-"Phylum"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="family"]<-"Family"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="genus"]<-"Genus"
+feature_levels<-c("Alpha Diversity","Composition", "Phylum", "Family", "Genus", "Gaussian ASV", "Binomial ASV")
+AllSigFeatures$Feature_Category<-factor(AllSigFeatures$Feature_Category, 
+                                              levels=feature_levels)
+GausSigFeatures<-AllSigFeatures %>% 
+  filter(Feature_Category!="Binomial ASV") 
+
+communitymetrics<-gaussian %>% 
+  filter(Feature_Category=="alpha_diversity"|Feature_Category=="beta_diversity") %>% 
+  select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj) %>% 
+  filter(p_linear_adj<=0.05|p_quad_adj<=0.05) #removed for rds output below
+communitymetrics$Feature<-gsub("betadiv_PC","PC",communitymetrics$Feature)
+
+#don't forget to rbind these to the rest for the plot
+GausSigLinear<-GausSigFeatures %>% 
+  arrange(Estimate_linear) %>% 
+  slice(1:25,nrow(GausSigFeatures):(nrow(GausSigFeatures)-24)) %>% #removed for rds output below
+  select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj)
+
+silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+  select(ASV,ASV_id,starts_with("taxa_")) %>% 
+  rename(Feature=ASV)
+
+metricsgauss_linear<-rbind(communitymetrics,GausSigLinear) %>% 
+  left_join(silva,by="Feature") %>% 
+  mutate(taxa_lab=case_when(Feature=="Hill.q1"~"Hill Number 1",
+                            Feature=="Hill.q2"~"Hill Number 2",
+                            Feature=="richness"~"ASV Richness",
+                            Feature=="ShannonH"~"Shannon's H",
+                            Feature=="Simpson"~"Simpson's Diversity",
+                            Feature_Category=="Gaussian ASV"~ASV_id,
+                            Feature_Category!="Gaussian ASV"&
+                              Feature_Category!="alpha_diversity"~Feature)) %>% 
+  mutate(taxa_lab=if_else(p_quad_adj<=0.05,paste(taxa_lab,"*",sep=""),taxa_lab)) %>% 
+  mutate(taxa_col=case_when(Feature_Category=="alpha_diversity"~ "#F8766D",
+                            Feature_Category=="beta_diversity"~ "#C5B33E",
+                            Feature_Category=="Phylum"~ "#00BA38",
+                            Feature_Category=="Family"~ "#01BFC4",
+                            Feature_Category=="Genus"~ "#629DFF",
+                            Feature_Category=="Gaussian ASV"~ "#F564E3")) 
+
+metricsgauss_linear$Feature_Category<-factor(metricsgauss_linear$Feature_Category,
+                                      levels=c("alpha_diversity","beta_diversity",
+                                               "Phylum","Family","Genus","Gaussian ASV"))
+#saveRDS(metricsgauss_linear,"../out/GaussianLMMOutputClean.rds")
+metricsgauss_linear<-metricsgauss_linear %>% 
+  arrange(Feature_Category,Estimate_linear) %>% 
+  mutate(taxa_lab2=case_when(taxa_lab=="Bacteria_Cyanobacteria_Gastranaerophilales_NA*"~
+                               "UC Family in Gastranaerophilales*",
+                             taxa_lab=="Bacteria_Firmicutes_NA_NA"~
+                               "UC Family in Firmicutes",
+                             taxa_lab=="Bacteria_Cyanobacteria_Gastranaerophilales_NA_NA*"~
+                               "UC Genus in Gastranaerophilales*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Peptostreptococcaceae_NA"~
+                               "UC Genus in Peptostreptococcaceae",
+                             taxa_lab=="Bacteria_Firmicutes_NA_NA_NA"~
+                               "UC Genus in Firmicutes",
+                             taxa_lab=="Bacteria_Proteobacteria_Enterobacteriales_Enterobacteriaceae_NA (G)*"~
+                               "UC Genus in Enterobacteriaceae*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_NA*"~
+                               "UC Genus in Clostridiaceae 1*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_Clostridium sensu stricto 1"~
+                               "Clostridium sensu stricto 1")) %>% 
+  mutate(taxa_lab2=if_else(is.na(taxa_lab2),taxa_lab,taxa_lab2)) %>% 
+  mutate(taxa_lab2=gsub("[A-z]+_","",taxa_lab2)) %>% 
+  select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj,taxa_lab,taxa_col,taxa_lab2) 
+
+metricsgauss_linear$no<-c(1:nrow(metricsgauss_linear))
+#metricsgauss$no<-c(1:6,15,7:14,16:nrow(metricsgauss)) when organizing by Feature alphabetically
+
+#metricsgauss_linear$taxa_lab <- gsub("_", ">", metricsgauss_linear$taxa_lab)
+
+communitymetrics<-metricsgauss_linear %>% filter(Feature_Category=="alpha_diversity"| 
+                                      Feature_Category=="beta_diversity")
+taxametrics<-metricsgauss_linear %>% filter(!Feature_Category=="alpha_diversity"& 
+                                      !Feature_Category=="beta_diversity")
+
+
+p2C_communityestimates <- ggplot(communitymetrics, aes(x=rev(no), y=Estimate_linear)) +
+  geom_bar(stat="identity",fill=communitymetrics$taxa_col,width=.75)+
+  geom_hline(yintercept=0,linetype="dashed",color="grey")+
+  scale_x_discrete(limits = communitymetrics$no, 
+                   labels = rev(communitymetrics$taxa_lab))+
+  geom_errorbar(aes(ymax = Estimate_linear+SE_linear, 
+                   ymin = Estimate_linear-SE_linear), 
+                   colour=communitymetrics$taxa_col, size=0.6,width=0.5)+
+  labs(y = "Linear Estimate",x="")+theme_bw()+
+  theme(legend.position = "none",
+        axis.text = element_text(size=30,color="black"),
+        axis.title = element_text(size=34),
+        plot.tag=element_text(size=44),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  coord_flip()+labs(tag="C");p2C_communityestimates
+ggsave(plot=p2C_communityestimates,filename = "../out/Figures/2C_CommunityEstimates.png",height=6,width=15,dpi=300,units="in")
+```
+```{r fig.height=21,fig.width=18}
+
+p2E_gausestimates <- ggplot(taxametrics, aes(x=rev(no), y=Estimate_linear)) +
+  geom_bar(stat="identity",fill=taxametrics$taxa_col,width=.75)+
+  geom_hline(yintercept=0,linetype="dashed",color="grey")+
+  scale_x_discrete(limits = taxametrics$no, 
+                   labels = c(rev(taxametrics$taxa_lab2),function(x) str_wrap(x, width = 10)))+
+  #scale_x_discrete(labels = function(x) str_wrap(x, width = 20)) +
+  geom_errorbar(aes(ymax = Estimate_linear+SE_linear, 
+                    ymin = Estimate_linear-SE_linear), 
+                    colour=taxametrics$taxa_col, size=0.6,width=0.5) +
+  labs(y = "Linear Estimate",x="")+theme_bw()+coord_flip()+labs(tag="D")+
+  theme(legend.position = "bottom",
+        axis.text = element_text(size=32,color="black"),
+        axis.title = element_text(size=37,color="black"),
+        plot.tag=element_text(size=44),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()); p2E_gausestimates
+ggsave(plot=p2E_gausestimates,filename = "../out/Figures/2E_Gaussian50Estimates.png", height=21,width=18,units="in", dpi=300)
+
+#{r FigGaussian50Estimates,fig.height=10.5,fig.width=8,fig.cap="Linear associations between mean-centered age and community metrics or the 50 taxa whose abundances exhibited the strongest effect sizes. Plot shows the 50 largest linear estimates for taxa that had significant associations with age. Points are colored by category of feature, and category of feature is also indicated in parentheses, where D is for diversity metrics, C for position, P for phylum, F for family, G for genus, and ASV for ASV. Features that also had a significant quadratic age term are indicated by a *."}
+#ggdraw() +
+#  draw_plot(p2C, x = .13, y = .78, width = .87, height = .22) +
+#  draw_plot(p2D, x= 0, y= 0, width = 1, height = .78) 
+#ggsave(filename = "../out/Figures/2CD_Gaussian50Estimates.png")
+```
+
+```{r fig.height=12,fig.width=22}
+ordination<-readRDS("../../2_beta/out/ordination_data_bstatus0.rds") %>% 
+  select(DADA_id, starts_with("PC")) %>% 
+  select(-c(PC3,PC9,PC10))
+colnames(ordination)<-c("DADA_id",paste("PC ",seq(1:2),"*",sep=""),paste("PC ",4:8,"*",sep=""))
+
+cow_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+  rename(age_chrono=age.years) %>%
+  select(DADA_id,age_chrono,ShannonH,Simpson,Hill.q1,Hill.q2) %>% 
+  rename("Hill No. 1*"=Hill.q1,
+         "Hill No. 2*"=Hill.q2,
+         "Shannon H*"=ShannonH,
+         "Simpson's Diversity*"=Simpson) %>% 
+  left_join(ordination,by="DADA_id") %>% 
+  mutate(age_floor=floor(age_chrono))
+
+most<-cow_metadata%>%
+  select(-DADA_id,-age_chrono)%>%
+  gather(key = 'Feature', value = 'value', -age_floor) %>%
+  group_by(age_floor, Feature) %>%
+  summarise(age_value = mean(value)) %>% 
+  ungroup() %>% 
+  mutate(color = ifelse(grepl("PC", Feature), "#C5B33E", "#F8766D")) 
+most2<-most %>%
+  group_by(Feature) %>% 
+  summarise() %>% 
+  ungroup() 
+most2$no<-c(1:2,5:11,3:4)
+#most2$no<-c(5:6,11,9:10,8,7,1:4)#setting the sort order
+most2<-arrange(most2,no)
+names<-most2$Feature
+most$Feature<-factor(most$Feature,levels=names)
+
+p2D_communityage<-ggplot(data=most,
+            aes(x=age_floor,
+                y=age_value))+
+  geom_line(stat="smooth",method = "loess", size = 2,alpha = 0.5,aes(col=color))+
+  geom_point(aes(group=age_floor,col=color),size=4)+theme_bw()+
+  scale_color_manual(values=c("#C5B33E","#F8766D"))+labs(tag="E")+
+  facet_wrap(~Feature, scales = "free",ncol=4,
+             labeller = label_wrap_gen(width=20,multi_line = TRUE))+
+  theme(strip.text.x = element_text(size = 32),
+        axis.text = element_text(color="black", size=27),
+        axis.title = element_text(color="black", size=36),
+        plot.tag=element_text(size=42),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(x="Age (years)",
+       y="Average Value");p2D_communityage
+ggsave(plot=p2D_communityage, filename = "../out/Figures/2D_CommunityMetricsAge.png",height=12,width=22,units="in",dpi=300)
+```
+
+```{r fig.height=20,fig.width=22}
+silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+  select(ASV,ASV_id,starts_with("taxa_")) %>% 
+  rename(Feature=ASV)
+silva2<-silva %>% select(Feature,ASV_id)
+
+top50features<-metricsgauss_linear %>% 
+  filter(Feature_Category!="alpha_diversity"&Feature_Category!="beta_diversity") %>% 
+  arrange(Estimate_linear) 
+
+top50features_list<-top50features$Feature
+phenotypes_readcount_raw<-readRDS('../../4_machinelearning/out/phenotypes_readcounts_no_chl_mt.rds')
+phenotypes_readcount<-phenotypes_readcount_raw%>%
+  column_to_rownames("DADA_id")
+phenotypes_readcount[phenotypes_readcount>0]<-1
+
+duck_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+  rename(age_chrono=age.years) %>% select(DADA_id,age_chrono)
+
+filtered_phenotypes_top50<-phenotypes_readcount%>%
+  select(.dots=top50features_list) %>% 
+  rownames_to_column("DADA_id")
+top50all_phenotype_names<-c("DADA_id",top50features_list)
+colnames(filtered_phenotypes_top50)<-top50all_phenotype_names
+
+metadata_top50all<-merge(duck_metadata,filtered_phenotypes_top50, by="DADA_id")
+metadata_top50all$age.floor<-floor(metadata_top50all$age_chrono)
+
+labels<-metricsgauss_linear %>% 
+  select(Feature,taxa_lab,no,Feature_Category) %>% 
+  mutate(taxa_lab2=case_when(taxa_lab=="Bacteria_Cyanobacteria_Gastranaerophilales_NA*"~
+                               "UC Family in Gastranaerophilales*",
+                             taxa_lab=="Bacteria_Firmicutes_NA_NA"~
+                               "UC Family in Firmicutes",
+                             taxa_lab=="Bacteria_Cyanobacteria_Gastranaerophilales_NA_NA*"~
+                               "UC Genus in Gastranaerophilales*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Peptostreptococcaceae_NA"~
+                               "UC Genus in Peptostreptococcaceae",
+                             taxa_lab=="Bacteria_Firmicutes_NA_NA_NA"~
+                               "UC Genus in Firmicutes",
+                             taxa_lab=="Bacteria_Proteobacteria_Enterobacteriales_Enterobacteriaceae_NA*"~
+                               "UC Genus in Enterobacteriaceae*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_NA*"~
+                               "UC Genus in Clostridiaceae 1*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_Clostridium sensu stricto 1"~
+                               "Clostridium sensu stricto 1")) %>% 
+  mutate(taxa_lab2=if_else(is.na(taxa_lab2),taxa_lab,taxa_lab2)) %>% 
+  mutate(taxa_lab2=gsub("[A-z]+_","",taxa_lab2)) 
+
+most<-metadata_top50all%>%
+  select(age.floor,top50all_phenotype_names)%>%
+  select(-DADA_id)%>%
+  gather(key = 'Feature', value = 'pres_abs', -age.floor) %>%
+  group_by(age.floor, Feature) %>%
+  summarise(total_samples = n(),
+            taxa_in_sample = sum(pres_abs),
+            prevalence=taxa_in_sample/total_samples) %>% 
+  ungroup() %>% 
+  left_join(labels,by="Feature") %>% 
+  left_join(silva2,by="Feature") %>% 
+  mutate(Feature=if_else(Feature_Category=="Gaussian ASV",ASV_id,Feature)) %>% 
+  arrange(Feature_Category) %>% 
+    mutate(taxa_col=case_when(Feature_Category=="Phylum"~ "#00BA38",
+                            Feature_Category=="Family"~ "#01BFC4",
+                            Feature_Category=="Genus"~ "#629DFF",
+                            Feature_Category=="Gaussian ASV"~ "#F564E3")) %>% 
+  filter(Feature_Category!="Gaussian ASV")
+
+most2<-most %>%
+  group_by(Feature,taxa_lab2,no) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  arrange(no) %>% 
+  mutate(taxa_lab2=as.factor(taxa_lab2))
+taxa_labels<-most2$taxa_lab2
+
+
+most$Feature=factor(most$taxa_lab2, levels=most2$taxa_lab2)
+
+p2F_gausage<-ggplot(data=most,
+            aes(x=age.floor,
+                y=prevalence,color=taxa_col))+
+  geom_line(stat="smooth",method = "loess", size = 2,alpha = 0.5,aes(col=taxa_col))+
+  geom_point(aes(group=age.floor),size=4)+theme_bw()+
+  scale_color_manual(values=c("#00BA38","#01BFC4","#629DFF","#F564E3"))+
+  labs(tag="F")+
+  facet_wrap(~Feature, scales = "free",ncol=4,
+             labeller = label_wrap_gen(width=20,multi_line = TRUE))+
+  theme(strip.text.x = element_text(size = 32),
+        axis.text = element_text(color="black", size=27),
+        axis.title = element_text(color="black", size=37),
+        plot.tag=element_text(size=42),
+        legend.position = "none",
+        panel.grid = element_blank())+
+  labs(x="Age (years)",
+       y="Prevalance");p2F_gausage
+ggsave(plot=p2F_gausage,filename = "../out/Figures/S3_Top50GausFeatures_noASV.png",height=20,width=22,dpi=300, units="in")
+
+#ggdraw() +
+ # draw_plot(p2E, x = -.01, y = .75, width = 1, height = .25) +
+  #draw_plot(p2F, x= 0, y= 0, width = 1, height = .75) 
+#ggsave(filename = "../out/Figures/2CD_Gaussian50Estimates.png")
+```
+## Combination of all fig 2 plots
+```{r}
+cow=ggdraw()+
+  draw_plot(p2a_relabunF, x=0, y=.8, width=.48,height = 0.18)+
+  draw_plot(p2b_relabunM, x=.48, y=.8, width=.52,height=0.18)+
+  draw_plot(p2C_communityestimates, x=0, y=.6, width=.4,height=0.2)+
+  draw_plot(p2D_communityage, x=.4, y=.5, width=.6,height=0.3)+
+  draw_plot(p2E_gausestimates, x=0, y=0, width=.4,height=0.6)+ #bottom left
+  draw_plot(p2F_gausage, x=.4, y=0, width=.6,height=0.5) #bottom right
+
+cow
+  
+ggsave(plot=cow,filename="../out/Figures/Fig2CowTest.png",width = 40, height = 35,units="in")
+
+bull=ggdraw()+
+  draw_plot(p2a_relabunF, x=0, y=.84, width=.5,height = 0.16)+
+  draw_plot(p2b_relabunM, x=0, y=.68, width=.5,height=0.16)+
+  draw_plot(p2C_communityestimates, x=0, y=.54, width=.5,height=0.14)+
+  draw_plot(p2E_gausestimates, x=0, y=0, width=.5,height=0.54)+ #bottom left
+  draw_plot(p2D_communityage, x=.50, y=.7, width=.5,height=0.3)+
+  draw_plot(p2F_gausage, x=.50, y=0, width=.5,height=0.7) #bottom right
+
+bull
+  
+ggsave(plot=bull,filename="../out/Figures/Fig2BullTest2.png",width = 38, height = 40,units="in")
+```
+
+# Fig 3
+```{r gauproplot,fig.cap="A microbiome clock of aging in wild baboons. Plots show predicted microbiome age in years (age~m~) from a Gaussian process regression model, relative to each baboon's true, chronological age in years (age~c~) at the time of sample collection. (A) Shows a linear fit for all subjects in the model, and (B) shows separate linear fits for each sex. On each plot, the dashed lines indicate a 1-to-1 relationship between age~c~ and age~m~."}
+H.PredLife<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+count<-H.PredLife %>% 
+  group_by(sname,sex) %>% 
+  summarise(count=n()) %>% 
+  ungroup() %>% 
+  group_by(sex) %>% 
+  summarise(count=n()) %>% 
+  ungroup()
+
+R_sq<-summary(lm(age_mb~age_chrono,data=H.PredLife))$adj.r.squared
+
+estimatesall<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
+  theme_bw()+
+  geom_point(pch=21,alpha=0.5,color="#5F5C59")+
+     geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5,color="#141301")+
+  geom_abline(intercept = 0, slope = 1, linetype=2,size=1.5,colour="gray33")+
+  #xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~`in`~years~(age[c])))+
+     ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4,y=22,label=paste("R^2 == ",round(R_sq,3)),parse=T,size=6)+
+  scale_x_continuous(expand=c(0,0))+
+  theme(#aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        axis.text = element_text(size = 16, color="black"),
+        axis.title=element_text(size=18),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #plot.margin=unit(c(0,0,0,0), "cm"),
+        legend.title=element_blank(),
+        plot.tag = element_text(size=20))+labs(tag="A");
+estimatessex<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_bw()+
+  geom_point(pch=21,alpha=0.5)+
+     geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5)+
+  geom_abline(intercept = 0, slope = 1, linetype=2,size=1.5,colour="gray33")+
+  scale_color_manual(name = 'sex',values = c('F' = 'darkgoldenrod3','M' = '#115163'),labels = c('female', 'male'))+
+  #xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~`in`~years~(age[c])))+
+     ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=5.55,y=22,label=bquote("R[females]^2 == 0.489"),parse=T,size=6)+
+  annotate("text",x=5.2,y=20,label=bquote("R[males]^2 == '0.500'"),parse=T,size=6)+
+  scale_x_continuous(expand=c(0,0))+
+  theme(#aspect.ratio=1,
+        legend.position = c(.475,.9), 
+        axis.text = element_text(size = 16, color="black"),
+        axis.title=element_text(size=18),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.text = element_text(size=16),
+        #plot.margin=unit(c(0,0,0,0.5), "cm"),
+        legend.title=element_blank(),
+        plot.tag = element_text(size=20))+labs(tag="B");
+grid.arrange(estimatesall, estimatessex, ncol=2)
+plots<-arrangeGrob(estimatesall,estimatessex,ncol=2)
+ggsave(plot=plots,filename = "../out/Figures/2A_GauProPlot.png",width=11,height=5,dpi=300,units="in")
+```
+
+```{r metricsconceptual, fig.height=7,fig.width=14,fig.cap="Plots illustrating the measurement of (A) sample specific microbiome age acceleration and (B) pace of microbiome aging in individual baboons. (A) Age acceleration is calculated for each microbiome sample as the difference between age~m~ and age~c~. Samples with positive values of age acceleration (e.g. the red sample) have older predicted microbiome age estimates than their true chronological age and would be considered microbially old-for-age. Samples with negative values of age acceleration (e.g. the blue sample) are microbially young-for-age. (B) Pace of microbiome aging reflects longitudinal change in microbiome age acceleration in individuals, controlling for chronological age and environmental variables known to explain variation in gut microbiome composition in Amboseli (Ren et al., 2015; Tung et al., 2015; JB 2021). Specifically, microbiome pace of aging for a given individual was calculated as the individual's random slope, controlling for the subject's chronological age on the day of sample collection, season on the day of sample collection, average maximum temperature the month prior to sample collection, and total rainfall the month prior to sample collection, with random intercepts for the hydrological year of sample collection and the social group membership on the day of sample collection. High values of microbiome pace of aging above the population median reflect individuals who have steep slopes and therefore fast paces of microbiome aging."}
+H.PredLife<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
+  theme_bw()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="black",size=1)+
+  geom_point(pch=21,alpha=0.10,color="#5F5C59")+
+     geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5,color="grey33")+
+  scale_x_continuous(expand=c(0,0))+
+  #xlim(0,25)+ylim(0,25)+
+  xlab(bquote(Chronological~Age~In~Years~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  ggtitle("Measuring Age Acceleration")+
+  geom_segment(aes(x=0,y=14,xend=6,yend=14, color="segment"), 
+               color = "red", linetype="dashed")+
+  geom_segment(aes(x=6,y=-2.5,xend=6,yend=14, color="segment"), 
+               color = "red", linetype="dashed")+
+  geom_point(aes(x=6,y=14), color = "red")+
+  #annotate(geom = "text", x = 4, y = 16.75, size=6,
+  #        label = bquote(Age~Accel.~`=`~Age[m]~`-`~Age[c]), 
+  #         hjust = "left",color="red")+
+  annotate(geom = "text", x = 9.5, y = 12.25, size=6,
+           label = bquote(`(`~8~`=`~14~`-`~6~`)`),color="red")+
+  annotate(geom = "text", x = 6.6, y = 14.25, size=6, lineheight = .9,
+           label = "Individual is microbially \n old for age", hjust = "left",color="red")+
+  geom_segment(aes(x=14,y=-2.5,xend=14,yend=6, color="segment"), 
+               color = "blue", linetype="dashed")+
+  geom_segment(aes(x=0,y=6,xend=14,yend=6, color="segment"), 
+               color = "blue", linetype="dashed")+
+  geom_point(aes(x=14,y=6), color = "blue")+
+  #annotate(geom = "text", x = 15.25, y = 7, size=6,
+  #         label = bquote(Age~Accel.~`=`~Age[m]~`-`~Age[c]), 
+  #         hjust = "left",color="blue")+
+  annotate(geom = "text", x = 14.75, y = 4.5, size=6, 
+           label = bquote(`(`~`-`~8~`=`~6~`-`~14~`)`), hjust = "left",color="blue")+
+  annotate(geom = "text", x = 14.25, y = 6.5, size=6, lineheight=0.9,
+           label = "Individual is microbially \n young for age", hjust = "left",color="blue")+
+  annotate(geom = "text", x = 8, y = 23, size=6,
+           label = bquote(Age~Accel.~`=`~Age[m]~`-`~Age[c]), hjust = "left",color="black")+labs(tag="C")+
+  theme(axis.title=element_text(size=18),
+        axis.text=element_text(size=16, color="black"),
+        plot.title = element_text(size=18,color="black"),
+        #aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #plot.margin=unit(c(0,0,0,0.0), "cm"),
+        legend.position = c(.2,.85), 
+        legend.title=element_blank(),
+        plot.tag = element_text(size=20));
+PredLifeCov<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/out/PredictedAge_EnviroCov.rds")
+H.PredLife_F<-PredLifeCov %>% filter(sex=="F")
+H.PredLife_M<-PredLifeCov %>% filter(sex=="M")
+H.PredLife_F$resid_cov<-resid(lmer(age_mb~age_chrono+
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                                    data=H.PredLife_F))
+H.PredLife_M$resid_cov<-resid(lmer(age_mb~age_chrono+
+                                      avg_month_maxtemp+
+                                      sum_month_rain+
+                                      season+
+                                      (1|collect_grp)+
+                                      (1|hydroyear),
+                                    data=H.PredLife_M))
+PredLifeCov<-rbind(H.PredLife_F,H.PredLife_M)
+
+estimatespace<-ggplot(data=PredLifeCov, aes(x=age_chrono,y=age_mb))+
+  theme_bw()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey33",size=1)+
+  geom_point(pch=21,alpha=0.1,color="#5F5C59")+
+  scale_x_continuous(expand=c(0,0))+
+  geom_point(data=PredLifeCov[PredLifeCov$sname=="RAN",],pch=21, alpha = 0.5, color="chocolate1", fill="chocolate1")+
+  geom_point(data=PredLifeCov[PredLifeCov$sname=="POK",],pch=21, alpha=0.5, color="chartreuse3", fill="chartreuse3")+
+  geom_smooth(method=lm, fill=NA,fullrange = F,size=1,color="#141301")+
+  geom_smooth(data=PredLifeCov[PredLifeCov$sname=="RAN",],method=lm, 
+              fill=NA,fullrange = F,size=1.5,color="chocolate1")+
+  geom_smooth(data=PredLifeCov[PredLifeCov$sname=="POK",],method=lm, 
+              fill=NA,fullrange = F,size=1.5,color="chartreuse3")+
+  ggtitle("Measuring Pace of Aging")+
+  xlab(bquote(Chronological~Age~In~Years~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate(geom = "curve", x = 8.0, y = 15.5, xend = 9, yend = 10.5,
+           curvature = .3, arrow = arrow(length = unit(2, "mm")), color="black",size=1) +
+  annotate(geom = "text", x = 6.5, y = 17, size=6,lineheight = .9,
+           label = "Individual has a faster pace of \n aging than is typical of the population", 
+           hjust = "left",color="chocolate3")+
+  annotate(geom = "curve", x = 15.5, y = 5, xend = 14.5, yend = 10,
+           curvature = .7, arrow = arrow(length = unit(2, "mm")), color="black",size=1) +
+  annotate(geom = "text", x = 8, y = 3.75, size=6,lineheight = .9,
+           label = "Individual has a slower pace of \n aging than is typical of the population", 
+           hjust = "left",color="chartreuse4") + 
+  annotate(geom = "text", x = 13.9, y = 22, size=6,lineheight = .5,
+           label = bquote(atop(Pace~of~Aging == ~individual~slope~from~phantom(),
+                      `lm`~`(`~age[m]~`~`~age[c]~`+`~environment~`+`~
+                        `(`~1~`+`~age[c]~`|`~individual~`))`)))+
+  labs(tag="D")+
+  theme(axis.title=element_text(size=18, color="black"),
+        axis.text=element_text(size=16, color="black"),
+        plot.title = element_text(size=18,color="black"),
+        #aspect.ratio=1,
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = c(.2,.85), 
+        #plot.margin=unit(c(0,0,0,0), "cm"),
+        legend.title=element_blank(),
+        plot.tag = element_text(size=20));estimatespace
+grid.arrange(estimatesageaccel, estimatespace, ncol=2)
+plots<-arrangeGrob(estimatesageaccel,estimatespace,ncol=2)
+ggsave(plot=plots,filename="../out/Figures/4A_ConceptualMetrics.png",width=11,height=5,dpi=300,units="in")
+```
+
+## Combining plots 
+```{r}
+sheep=ggdraw()+
+  draw_plot(estimatesall, x=0, y=.5, width=.5,height = 0.5)+
+  draw_plot(estimatessex, x=.5, y=.5, width=.5,height=0.5)+
+  draw_plot(estimatesageaccel, x=0, y=0, width=.5,height=0.5)+
+  draw_plot(estimatespace, x=.5, y=0, width=.5,height=0.5)
+
+sheep
+  
+ggsave(plot=sheep,filename="../out/Figures/Fig3Sheep.png",width = 14, height = 14,units="in")
+```
+
+# Fig 4
+```{r rankplots,fig.height=11,fig.width=11, fig.cap="Rank predicts lifetime microbial aging in both sexes. Plots with yellow points (on the left; A,C) show microbial metrics of aging in females and plots with blue points (on the right; B,D) show microbial metrics of aging in males. Corrected age acceleration was corrected represents the residuals of the relationship between age~m~ and age~c~. For side by side comparison, both sexes are shown here with proportional rank values, which are derived from ordinal rank assessments. High ranked individuals are ranked closer to 1 and low ranked individuals are ranked closer to 0. However, males were modeled using ordinal rank values, as reflected by the * in the model output depicted."}
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>%
+  select(sname,collection_date,collect_grp,ordrank,proprank)
+ranks$collect_grp<-as.factor(ranks$collect_grp)
+PredLifeCov<-readRDS("../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.rds") %>% 
+  left_join(ranks,by=c("sname","collection_date","collect_grp"))
+#write_csv(PredLifeCov,"../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.csv")
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds")
+PredLifeCov_F<-PredLifeCov %>% filter(sex=="F")
+  mean(PredLifeCov_F$slope_life_1step);sd(PredLifeCov_F$slope_life_1step);
+  min(PredLifeCov_F$slope_life_1step);max(PredLifeCov_F$slope_life_1step)
+PredLifeCov_M<-PredLifeCov %>% filter(sex=="M")
+p.females<-ggplot(data=PredLifeCov_F,
+                  aes(x=proprank,y=resid_life))+
+  geom_jitter(alpha=0.5, color="darkgoldenrod3")+geom_smooth(method="lm", color="darkgoldenrod1")+
+  xlab("Proportional Dominance Rank")+
+  ylab("Corrected Age Acceleration")+
+  theme_bw()+
+  annotate("text",x=.7,y=11.25,label="n == 6736",
+           parse=T,size=6)+
+  annotate("text",x=.7,y=10,label=expression(paste(beta," = 1.77; ","p < 0.001")),
+           parse=T,size=6)+
+  ggtitle("Females")+
+  theme(plot.title = element_text(size=18),
+        axis.title=element_text(size=16),
+        panel.grid = element_blank(),
+        aspect.ratio = 1,
+        axis.text=element_text(size=12,color="black"),
+        legend.position = c(.2,.85), 
+        plot.tag = element_text(size=20),
+        legend.title=element_blank())+labs(tag="A");
+
+p.males<-ggplot(data=PredLifeCov_M,
+                  aes(x=proprank,y=resid_life))+
+  geom_jitter(alpha=0.5, color="#115163")+geom_smooth(method="lm", color="#3FBCDE")+
+  xlab("Proportional Dominance Rank")+
+  ylab("Corrected Age Acceleration")+
+  theme_bw()+
+  annotate("text",x=.7,y=12.25,label="n == 4341",
+           parse=T,size=6)+
+  annotate("text",x=.7,y=11,label=expression(paste(beta," = 0.032*; ","p < 0.001")),
+           parse=T,size=6)+
+  ggtitle("Males")+
+  theme(plot.title = element_text(size=18),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=12,color="black"),
+        panel.grid = element_blank(),
+        aspect.ratio = 1,
+        legend.position = c(.2,.85),
+        plot.tag = element_text(size=20),
+        legend.title=element_blank())+labs(tag="B");
+
+slopes2<-readRDS("../../5_milestone-analyses/out/metadata_slopes_life_and_breakpoints.rds")
+ranks<-readRDS("../../1_data/out/rank_raw_adult_Feb2021.rds") %>% 
+  select(sname, collection_date, ordrank,proprank)
+
+slopes2_rank<-slopes2 %>% 
+  left_join(ranks,by=c("sname","collection_date")) %>% 
+  group_by(sname,sex,slope_life_1step) %>% 
+  summarise(avg_proprank=mean(proprank),
+         avg_ordrank=mean(ordrank)) %>% 
+  ungroup()
+
+
+  #mean(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step);sd(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step);
+  #min(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step);max(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step)
+   #mean(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T);sd(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T);
+  #min(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T);max(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T)
+
+slopeplot_F<-ggplot(data=slopes2_rank[slopes2_rank$sex=="F",],aes(x=avg_proprank,y=slope_life_1step))+
+  geom_jitter(alpha=0.75, color="darkgoldenrod3")+geom_smooth(method="lm", color="darkgoldenrod1")+
+  xlab("Average Lifetime Proportional \n Dominance Rank")+
+  ylab("Pace of Aging")+
+  theme_bw()+
+  annotate("text",x=.7,y=.86,label="n == 188",
+           parse=T,size=6)+
+  annotate("text",x=.7,y=.82,label=expression(paste(beta," = - 0.172; ","p < 0.001")),
+           parse=T,size=6)+
+  ggtitle("Females")+
+  theme(plot.title = element_text(size=18),
+        axis.title=element_text(size=16,color="black"),
+        axis.text=element_text(size=12),
+        legend.position = c(.2,.85), 
+        panel.grid = element_blank(),
+        plot.tag = element_text(size=20),
+        aspect.ratio = 1,
+        legend.title=element_blank())+labs(tag="C");
+
+slopeplot_M<-ggplot(data=slopes2_rank[slopes2_rank$sex=="M",],aes(x=avg_proprank,y=slope_life_1step))+
+  geom_jitter(alpha=0.75, color="#115163")+#geom_smooth(method="lm", color="#3FBCDE")+
+  xlab("Average Lifetime Proportional \n Dominance Rank")+
+  ylab("Pace of Aging")+
+  theme_bw()+
+  annotate("text",x=.7,y=.89,label=paste("n == 161"),
+           parse=T,size=6)+
+  annotate("text",x=.7,y=.86,label=expression(paste(beta," = - 0.0002*; ","p = 0.766")),
+           parse=T,size=6)+
+  ggtitle("Males")+
+  theme(plot.title = element_text(size=18),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=12,color="black"),
+        panel.grid = element_blank(),
+        legend.position = c(.2,.85),
+        plot.tag = element_text(size=20), 
+        aspect.ratio = 1,
+        legend.title=element_blank())+labs(tag="D");
+plots<-(p.females+p.males)/(slopeplot_F+slopeplot_M)
+plots
+ggsave(plot=plots,filename="../out/Figures/4C_rankplots.png",height=11,width=11, units="in", dpi=300)
+```
+```{r fig.height=11,fig.width=11}
+
+PredLifeCov_F2<-PredLifeCov_F %>% mutate(season=if_else(season=="wet","Wet","Dry"))
+season_females<-ggplot(data=PredLifeCov_F2,
+                  aes(x=season,y=age_mb))+
+  geom_jitter(alpha=0.75, color="darkgoldenrod3")+geom_boxplot(alpha=0.5)+
+  theme_bw()+
+  xlab("Season")+
+  ylab("Age Acceleration")+
+  annotate("text",x=1.5,y=23,label=paste("n == 192"),
+           parse=T,size=5)+
+  annotate("text",x=1.5,y=21.5,label=expression(paste(beta," = - 0.180; ","p = 0.021")),
+           parse=T,size=5)+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=12))+labs(tag="A");
+
+EA<-readRDS("../../4_machinelearning/out/ea_dataset.rds")
+
+Male_EA<-PredLifeCov_M %>%
+  select(sname,age_chrono,age_mb,delta,avg_month_maxtemp,sum_month_rain,season,collect_grp,hydroyear) %>% 
+  left_join(EA,by="sname") %>% 
+  drop_na() %>% 
+  mutate(drought=if_else(drought=="TRUE","Experienced","Did not experience"),
+         highGrpSize=if_else(highGrpSize=="TRUE","Experienced","Did not experience"),
+         lowMatSCI=if_else(lowMatSCI=="TRUE","Experienced","Did not experience")) 
+Male_EA$resid_life<-resid(lmer(delta~age_chrono+
+                            avg_month_maxtemp+
+                            sum_month_rain+
+                            season+
+                            (1|sname)+
+                            (1|collect_grp)+
+                            (1|hydroyear),
+                          data=Male_EA))
+
+drought_males<-ggplot(data=Male_EA,
+                  aes(x=drought,y=resid_life))+
+  geom_jitter(alpha=0.75, color="#115163")+geom_boxplot(alpha=0.5)+
+  theme_bw()+
+  xlab("Drought")+
+  ylab("Corrected Age Acceleration")+
+  annotate("text",x=1.5,y=15,label=paste("n == 168"),
+           parse=T,size=5)+
+  annotate("text",x=1.5,y=13.75,label=expression(paste(beta," = - 0.451; ","p = 0.021")),
+           parse=T,size=5)+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=12))+labs(tag="B");
+
+grpsize_males<-ggplot(data=Male_EA,
+                  aes(x=highGrpSize,y=resid_life))+
+  geom_jitter(alpha=0.75, color="#115163")+geom_boxplot(alpha=0.5)+
+  theme_bw()+
+  xlab("High group size")+
+  ylab("Corrected Age Acceleration")+
+  annotate("text",x=1.5,y=15,label=paste("n == 168"),
+           parse=T,size=5)+
+  annotate("text",x=1.5,y=13.75,label=expression(paste(beta," =  0.471; ","p = 0.033")),
+           parse=T,size=5)+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=12))+labs(tag="C");
+
+lowmatSCI_males<-ggplot(data=Male_EA,
+                  aes(x=lowMatSCI,y=resid_life))+
+  geom_jitter(alpha=0.75, color="#115163")+geom_boxplot(alpha=0.5)+
+  theme_bw()+
+  xlab("Low maternal social connectedness")+
+  ylab("Corrected Age Acceleration")+
+  annotate("text",x=1.5,y=15,label=paste("n == 168"),
+           parse=T,size=5)+
+  annotate("text",x=1.5,y=13.75,label=expression(paste(beta," = - 0.395; ","p = 0.006")),
+           parse=T,size=5)+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title=element_text(size=16),
+        axis.text=element_text(size=12))+labs(tag="D");
+
+plots2<-(season_females+drought_males)/(grpsize_males+lowmatSCI_males)
+plots2
+
+ggsave(plot=plots2,filename="../out/Figures/4D_socioenviroplots.png")
+```
+
+
+# Supplementary Methods and Results
+## Fig S1
+```{r lmmfeatures, fig.height=7, fig.width=8, fig.cap="The proportion of features that were significantly predicted by age, where age was modeled as (A) a linear term, or (B) a quadratic term in a linear mixed model (significance is FDR corrected using the Benjamini-Hochberg procedure with a threshold of 0.05). All features were modeled using Gaussian error distributions, except the features labeled 'binomial ASVs', which were modeled using a binomial error distribution (see Methods)."}
+
+age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_meancentered_May21.rds")
+#age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_inclASVs25to50.rds")
+colnames(age_gaussian_quad)<-gsub("_A","_linear",colnames(age_gaussian_quad));
+colnames(age_gaussian_quad)<-gsub("_B","_quad",colnames(age_gaussian_quad));
+colnames(age_gaussian_quad)<-gsub("Term","Age",colnames(age_gaussian_quad));
+
+gaussian_features<-as.data.frame(readRDS("../../4_machinelearning/out/phenotype_types.rds")) %>% 
+  mutate(Feature=as.character(phenotype_names)) %>% select(-phenotype_names)
+gaussian_features2<-gaussian_features
+gaussian_features2[gaussian_features2=="ASV"]<-"ASV"
+
+gaussian<-age_gaussian_quad %>% 
+  left_join(gaussian_features2,by="Feature") %>% 
+  rename(Feature_Category=phenotype_type) %>% 
+  mutate_if(is.factor, as.character)%>%
+  mutate_at(vars(matches("(Estimate)|(SE)|(p_value)")), as.numeric) %>% 
+  mutate(p_linear_adj=p.adjust(p_value_linear, method="BH"),
+         p_quad_adj=p.adjust(p_value_quad, method="BH")) %>% 
+  select(-matches("Age"))
+
+binomial<-readRDS("../../5_feature-analyses/out/binomial_features_BHadjusted2_wide.rds") %>% 
+  mutate(p_linear_adj=p.adjust(p_value_linear, method="BH"),
+         p_quad_adj=p.adjust(p_value_quad, method="BH"))
+all_features<-rbind(gaussian,binomial)
+
+AllSigFeatures<-all_features %>% 
+  mutate(Significance_linear = if_else(p_linear_adj<=0.05,T,F),
+         Significance_quad = if_else(p_quad_adj<=0.05,T,F)) 
+
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="beta_diversity"]<-"Composition"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="alpha_diversity"]<-"Alpha Diversity"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="phylum"]<-"Phylum"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="family"]<-"Family"
+AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="genus"]<-"Genus"
+feature_levels<-c("Alpha Diversity","Composition", "Phylum", "Family", "Genus", "ASV", "Binomial ASV")
+AllSigFeatures$Feature_Category<-factor(AllSigFeatures$Feature_Category, 
+                                              levels=feature_levels)
+
+summary_features_linear<-AllSigFeatures %>% 
+  group_by(Feature_Category) %>% 
+  mutate(total=n()) %>% 
+  ungroup() %>% 
+  group_by(Feature_Category,total,Significance_linear) %>% 
+  summarise(count_linear=n()) %>% 
+  ungroup() %>% 
+  mutate(proportion_linear=count_linear/total)
+
+summary_features_linear$Significance_linear[summary_features_linear$Significance_linear=="TRUE"]<-"Significant"
+summary_features_linear$Significance_linear[summary_features_linear$Significance_linear=="FALSE"]<-"Not Significant"
+
+summary_features_linear$fill_color<-c("#FBB6B1","#F8766D",#AD
+              "#E8E0B0","#C5B33E",#Composition
+              "#C2FFD4","#00BA38",#Phylum
+              "#9AFBFE","#01BFC4",#Family
+              "#ADCDFF","#629DFF", #Genus
+              "#FBC5F5","#F564E3",#gASV
+              "#B996ED","#7F3FDE")#bASV
+summary_features_linear$no<-c(1:nrow(summary_features_linear))
+summary_features_linear$no<-as.factor(summary_features_linear$no)
+summary_features_linear<-slice(summary_features_linear,-c(13,14)) #removing binomial asvs
+
+plot4<-ggplot(summary_features_linear,aes(x=Feature_Category,y=proportion_linear,fill=no))+
+    geom_bar(stat="identity",color="black",width=.80)+
+    scale_fill_manual(name=summary_features_linear$fill_color,
+                      values=summary_features_linear$fill_color)+
+  ylab("Proportion of Features")+
+  annotate("text",x=1,y=.9,label="2",parse=T,size=5)+
+  annotate("text",x=2,y=.9,label="3",parse=T,size=5)+
+  annotate("text",x=3,y=.9,label="12",parse=T,size=5)+
+  annotate("text",x=4,y=.9,label="190",parse=T,size=5)+
+  annotate("text",x=5,y=.9,label="538",parse=T,size=5)+
+  annotate("text",x=6,y=.9,label="146",parse=T,size=5)+
+  
+  annotate("text",x=1,y=.1,label="3",parse=T,size=5)+
+  annotate("text",x=2,y=.1,label="7",parse=T,size=5)+
+  annotate("text",x=3,y=.1,label="18",parse=T,size=5)+
+  annotate("text",x=4,y=.1,label="100",parse=T,size=5)+
+  annotate("text",x=5,y=.1,label="209",parse=T,size=5)+
+  annotate("text",x=6,y=.1,label="212",parse=T,size=5)+
+    #scale_x_discrete(expand = c(0,0))+
+    #scale_y_continuous(expand = c(0,0),labels = scales::percent)+
+  theme_bw()+
+    theme(legend.position="none",
+          axis.text = element_text(size=16,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_blank(),
+          #axis.line.x = element_line(size=.4),
+          #axis.line.y = element_line(size=.4),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+        plot.tag = element_text(size=20),
+          panel.border = element_rect(colour = "black", fill=NA))+labs(tag="A");
+
+summary_features_quad<-AllSigFeatures %>% 
+  group_by(Feature_Category) %>% 
+  mutate(total=n()) %>% 
+  ungroup() %>% 
+  group_by(Feature_Category,total,Significance_quad) %>% 
+  summarise(count_quad=n()) %>% 
+  ungroup() %>% 
+  mutate(proportion_quad=count_quad/total)
+
+summary_features_quad$Significance_quad[summary_features_quad$Significance_quad=="TRUE"]<-"Significant"
+summary_features_quad$Significance_quad[summary_features_quad$Significance_quad=="FALSE"]<-"Not Significant"
+
+summary_features_quad$fill_color<-c("#FBB6B1","#F8766D",#AD
+              "#E8E0B0","#C5B33E",#Composition
+              "#C2FFD4","#00BA38",#Phylum
+              "#9AFBFE","#01BFC4",#Family
+              "#ADCDFF","#629DFF", #Genus
+              "#FBC5F5","#F564E3",#gASV
+              "#B996ED","#7F3FDE")#bASV
+summary_features_quad$no<-c(1:nrow(summary_features_quad))
+summary_features_quad$no<-as.factor(summary_features_quad$no)
+summary_features_quad<-slice(summary_features_quad,-c(13,14)) #removing binomial asvs
+plot5<-ggplot(summary_features_quad,aes(x=Feature_Category,y=proportion_quad,fill=no))+
+    geom_bar(stat="identity",color="black",width=.80)+
+    scale_fill_manual(name=summary_features_quad$fill_color,
+                      values=summary_features_quad$fill_color)+
+  ylab("Proportion of Features")+
+  annotate("text",x=1,y=.9,label="1",parse=T,size=5)+
+  annotate("text",x=2,y=.9,label="7",parse=T,size=5)+
+  annotate("text",x=3,y=.9,label="15",parse=T,size=5)+
+  annotate("text",x=4,y=.9,label="207",parse=T,size=5)+
+  annotate("text",x=5,y=.9,label="551",parse=T,size=5)+
+  annotate("text",x=6,y=.9,label="178",parse=T,size=5)+
+  
+  annotate("text",x=1,y=.1,label="4",parse=T,size=5)+
+  annotate("text",x=2,y=.1,label="3",parse=T,size=5)+
+  annotate("text",x=3,y=.1,label="15",parse=T,size=5)+
+  annotate("text",x=4,y=.1,label="83",parse=T,size=5)+
+  annotate("text",x=5,y=.1,label="196",parse=T,size=5)+
+  annotate("text",x=6,y=.1,label="180",parse=T,size=5)+
+  theme_bw()+
+    theme(legend.position="none",
+          axis.text = element_text(size=16,color="black"),
+          axis.title.y = element_text(size=18,color="black"),
+          axis.title.x = element_blank(),
+          #axis.line.x = element_line(size=.4),
+          #axis.line.y = element_line(size=.4),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+        plot.tag = element_text(size=20),
+          panel.border = element_rect(colour = "black", fill=NA))+labs(tag="B");
+
+plot6<-plot4/plot5
+plot6
+ggsave(plot=plot6,filename = "../out/Figures/LMMFeatures2.png",height=7, width=10,units="in",dpi=300)
+```
+
+## Fig S2
+```{r FigGaussianQuad50Estimates,fig.height=10,fig.width=8,fig.cap="Taxa with the highest quadratic associations with age. Plot shows the size of the quadratic estimate for taxa that had significant associations with age. Points are colored by category of feature."}
+silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+  rename(Feature=ASV) %>% select(Feature, ASV_id,starts_with("taxa_"))
+
+GausSigQuad<-GausSigFeatures %>%   
+  arrange(Estimate_quad) %>% 
+  slice(1:25,nrow(GausSigFeatures):(nrow(GausSigFeatures)-24)) %>% 
+  select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj) %>% 
+  mutate(Feature_Category=as.character(Feature_Category)) %>% 
+  mutate(Feature_Category=if_else(Feature_Category=="Gaussian ASV","ASV",Feature_Category)) %>% 
+  mutate(Feature_Category=as.factor(Feature_Category))
+
+communitymetrics<-communitymetrics %>% 
+  select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj) %>% 
+  mutate(Feature_Category=as.character(Feature_Category)) %>% 
+  mutate(Feature_Category=if_else(Feature_Category=="alpha_diversity","Alpha Diversity",Feature_Category)) %>% 
+  mutate(Feature_Category=if_else(Feature_Category=="beta_diversity","Beta Diversity",Feature_Category)) %>% 
+  mutate(Feature_Category=as.factor(Feature_Category))
+
+metricsgauss_quad<-rbind(communitymetrics,GausSigQuad) %>%  
+  left_join(silva,by="Feature") %>% 
+  mutate(taxa_lab=case_when(Feature=="Hill.q1"~"Hill Number (q=1)",
+                            Feature=="Hill.q2"~"Hill Number (q=2)",
+                            Feature=="richness"~"ASV Richness",
+                            Feature=="ShannonH"~"ASV Shannon's H",
+                            Feature=="Simpson"~"ASV Simpson's Diversity",
+                            Feature_Category=="ASV"~ASV_id,
+                            Feature_Category=="Beta Diversity"~Feature,
+                            Feature=="Bacteria_Cyanobacteria"~"Cyanobacteria",
+                            Feature=="Bacteria_Lentisphaerae"~"Lentisphaerae",
+                            Feature=="Bacteria_Firmicutes_Selenomonadales_Acidaminococcaceae"~"Acidaminococcaceae",
+                            Feature=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1"~"Clostridiaceae 1",
+                            Feature=="Bacteria_Epsilonbacteraeota_Campylobacterales_Campylobacteraceae"~"Campylobacteraceae",
+                            Feature=="Bacteria_Cyanobacteria_Gastranaerophilales_NA"~"UC Family in Gastranaerophilales",
+                            Feature=="Bacteria_Lentisphaerae_Victivallales_vadinBE97"~"vadinBE97",
+                            Feature=="Bacteria_Tenericutes_NA_NA"~"UC Family in Tenericutes",
+                            Feature=="Bacteria_Firmicutes_Selenomonadales_Acidaminococcaceae_Acidaminococcus"~"Acidaminococcus",
+                            Feature=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_NA"~"UC Genus in Clostridiaceae 1",
+                            Feature=="Bacteria_Firmicutes_Clostridiales_Lachnospiraceae_Lachnospira"~"Lachnospira",
+                            Feature=="Bacteria_Firmicutes_Erysipelotrichales_Erysipelotrichaceae_Solobacterium"~"Solobacterium",
+                            Feature=="Bacteria_Epsilonbacteraeota_Campylobacterales_Campylobacteraceae_Campylobacter"~"Campylobacter",
+                            Feature=="Bacteria_Cyanobacteria_Gastranaerophilales_NA_NA"~"UC Genus in Gastranaerophilales",
+                            Feature=="Bacteria_Firmicutes_Clostridiales_Ruminococcaceae_Ruminococcaceae UCG-014"~"Ruminococcaceae UCG-014",
+                            Feature=="Bacteria_Spirochaetes_Spirochaetales_Spirochaetaceae_Treponema 2"~"Treponema 2",
+                            Feature=="Bacteria_Lentisphaerae_Victivallales_vadinBE97_NA"~"UC Genus in vadinBE97",
+                            Feature=="Bacteria_Tenericutes_NA_NA_NA"~"UC Genus in Tenericutes")) %>%
+  mutate(taxa_lab=case_when(Feature_Category=="Alpha Diversity"~ paste(taxa_lab,"(D)"),
+                            Feature_Category=="Beta Diversity"~ paste(taxa_lab,"(C)"),
+                            Feature_Category=="Phylum"~ paste(taxa_lab,"(P)"),
+                            Feature_Category=="Family"~ paste(taxa_lab,"(F)"),
+                            Feature_Category=="Genus"~ paste(taxa_lab,"(G)"),
+                            Feature_Category=="ASV"~ paste(taxa_lab,"(ASV)"))) %>% 
+  mutate(taxa_lab=if_else(p_linear_adj<=0.05,paste(taxa_lab,"*"),taxa_lab))
+metricsgauss_quad$Feature_Category<-factor(metricsgauss_quad$Feature_Category,
+                                      levels=c("Alpha Diversity","Beta Diversity",
+                                               "Phylum","Family","Genus","ASV"))
+metricsgauss_quad<-metricsgauss_quad %>% 
+  arrange(Feature_Category,Estimate_quad) %>% 
+  select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj,taxa_lab) %>% 
+  mutate(taxa_col=case_when(Feature_Category=="Alpha Diversity"~ "#F8766D",
+                            Feature_Category=="Beta Diversity"~ "#C5B33E",
+                            Feature_Category=="Phylum"~ "#00BA38",
+                            Feature_Category=="Family"~ "#01BFC4",
+                            Feature_Category=="Genus"~ "#629DFF",
+                            Feature_Category=="ASV"~ "#F564E3")) 
+metricsgauss_quad$no<-c(1:nrow(metricsgauss_quad))
+#metricsgauss$no<-c(1:6,15,7:14,16:nrow(metricsgauss)) when organizing by Feature alphabetically
+#metricsgauss_quad$taxa_lab <- gsub("_", " ", metricsgauss_quad$taxa_lab)
+
+pB <- ggplot(metricsgauss_quad, aes(x=rev(no), y=Estimate_quad))+
+  geom_bar(stat="identity",width=.75,fill=metricsgauss_quad$taxa_col)+
+  geom_hline(yintercept=0,linetype="dashed",color="grey")+
+  scale_x_discrete(limits = metricsgauss_quad$no, 
+                   labels = rev(metricsgauss_quad$taxa_lab)) +
+  geom_errorbar(aes(ymax = Estimate_quad+SE_quad, 
+                    ymin = Estimate_quad-SE_quad, 
+                    colour=Feature_Category), size=0.8) +
+  #scale_colour_manual(values = palBcol, guide = guide_legend(title = "",ncol=1)) +
+  labs(y = "Quadratic Estimate",x="")+theme_bw()+
+  theme(legend.position = "bottom",
+        legend.text = element_text(size=24),
+        legend.title = element_blank(),
+        axis.text = element_text(size=26, color="black"),
+        axis.title = element_text(size=30),
+        legend.key.height = )+ 
+  guides(colour = guide_legend(nrow=2, byrow=TRUE,
+                               override.aes = list(size=3)))+
+  coord_flip();pB
+ggsave(plot=pB,filename="../out/Figures/SuppGaussianQuad50Estimates.png", height=24,width=17,units="in",dpi=300)
+```
+
+```{r CommunityMetricsAge, fig.height=3.3,fig.width=8, fig.cap="Relationship between all community metrics and age. Metrics that were significantly predicted by age are indicated with a * after their label."}
+
+ordination<-readRDS("../../2_beta/out/ordination_data_bstatus0.rds") %>% 
+  select(DADA_id, starts_with("PC")) %>% 
+  select(-c(PC3,PC9,PC10))
+colnames(ordination)<-c("DADA_id",paste("Compositional PC ",seq(1:2),"*",sep=""),paste("Compositional PC ",4:8,"*",sep=""))
+
+cow_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+  rename(age_chrono=age.years) %>%
+  select(DADA_id,age_chrono,ShannonH,Simpson,Hill.q1,Hill.q2) %>% 
+  rename("Hill Number (q=1)*"=Hill.q1,
+         "Hill Number (q=2)*"=Hill.q2,
+         "Shannon's H*"=ShannonH,
+         "Simpson's Diversity*"=Simpson) %>% 
+  left_join(ordination,by="DADA_id") %>% 
+  mutate(age_floor=floor(age_chrono))
+
+most<-cow_metadata%>%
+  select(-DADA_id,-age_chrono)%>%
+  gather(key = 'Feature', value = 'value', -age_floor) %>%
+  group_by(age_floor, Feature) %>%
+  summarise(age_value = mean(value)) %>% 
+  ungroup() %>% 
+  mutate(color = ifelse(grepl("Compositional PC", Feature), "#C5B33E", "#F8766D")) 
+most2<-most %>%
+  group_by(Feature) %>% 
+  summarise() %>% 
+  ungroup() 
+most2$no<-c(5:6,11,9:10,8,7,1:4)#setting the sort order
+most2<-arrange(most2,no)
+names<-most2$Feature
+most$Feature<-factor(most$Feature,levels=names)
+
+
+
+metricsplot<-ggplot(data=most,
+            aes(x=age_floor,
+                y=age_value))+
+  geom_point(aes(group=age_floor,col=color))+theme_bw()+
+  scale_color_manual(values=c("#C5B33E","#F8766D"))+
+  facet_wrap(~Feature, scales = "free",ncol=5)+
+  theme(strip.text.x = element_text(size = 8),
+        axis.text.x = element_text(color="black", size=10),
+        axis.title.x = element_text(color="black", size=15),
+        axis.title.y = element_text(color="black", size=15),
+        legend.position = "none")+
+  labs(x="Age",
+       y="Average Value");metricsplot
+#ggsave(plot=metricsplot,filename = "../out/Figures/SuppCommunityMetricsAge.png")
+```
+
+```{r Top50GausFeatures, fig.height=11,fig.width=8, fig.cap="Relationship between the top 50 Gaussian features and age."}
+silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+  select(ASV,ASV_id,starts_with("taxa_")) %>% 
+  rename(Feature=ASV)
+silva2<-silva %>% select(Feature,ASV_id)
+
+top50features<-metricsgauss_linear %>% 
+  filter(Feature_Category!="alpha_diversity"&Feature_Category!="beta_diversity") %>% 
+  arrange(Estimate_linear)
+
+top50features_list<-top50features$Feature
+phenotypes_readcount_raw<-readRDS('../../4_machinelearning/out/phenotypes_readcounts_no_chl_mt.rds')
+phenotypes_readcount<-phenotypes_readcount_raw%>%
+  column_to_rownames("DADA_id")
+phenotypes_readcount[phenotypes_readcount>0]<-1
+
+duck_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+  rename(age_chrono=age.years) %>% select(DADA_id,age_chrono)
+
+filtered_phenotypes_top50<-phenotypes_readcount%>%
+  select(.dots=top50features_list) %>% 
+  rownames_to_column("DADA_id")
+top50all_phenotype_names<-c("DADA_id",top50features_list)
+colnames(filtered_phenotypes_top50)<-top50all_phenotype_names
+
+metadata_top50all<-merge(duck_metadata,filtered_phenotypes_top50, by="DADA_id")
+metadata_top50all$age.floor<-floor(metadata_top50all$age_chrono)
+
+labels<-metricsgauss_linear %>% 
+  select(Feature,taxa_lab,no,Feature_Category) %>% 
+  mutate(taxa_lab2=case_when(taxa_lab=="Bacteria_Cyanobacteria_Gastranaerophilales_NA (F)*"~
+                               "Uncharacterized Family in Gastranaerophilales*",
+                             taxa_lab=="Bacteria_Firmicutes_NA_NA (F)"~
+                               "Uncharacterized Family in Firmicutes",
+                             taxa_lab=="Bacteria_Cyanobacteria_Gastranaerophilales_NA_NA (G)*"~
+                               "Uncharacterized Genus in Gastranaerophilales*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Peptostreptococcaceae_NA (G)"~
+                               "Uncharacterized Genus in Peptostreptococcaceae",
+                             taxa_lab=="Bacteria_Firmicutes_NA_NA_NA (G)"~
+                               "Uncharacterized Genus in Firmicutes",
+                             taxa_lab=="Bacteria_Proteobacteria_Enterobacteriales_Enterobacteriaceae_NA (G)*"~
+                               "Uncharacterized Genus in Enterobacteriaceae*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_NA (G)*"~
+                               "Uncharacterized Genus in Clostridiaceae 1*",
+                             taxa_lab=="Bacteria_Firmicutes_Clostridiales_Clostridiaceae 1_Clostridium sensu stricto 1 (G)"~
+                               "Clostridium sensu stricto 1 (G)")) %>% 
+  mutate(taxa_lab2=if_else(is.na(taxa_lab2),taxa_lab,taxa_lab2)) %>% 
+  mutate(taxa_lab2=gsub("[A-z]+_","",taxa_lab2)) 
+
+most<-metadata_top50all%>%
+  select(age.floor,top50all_phenotype_names)%>%
+  select(-DADA_id)%>%
+  gather(key = 'Feature', value = 'pres_abs', -age.floor) %>%
+  group_by(age.floor, Feature) %>%
+  summarise(total_samples = n(),
+            taxa_in_sample = sum(pres_abs),
+            prevalence=taxa_in_sample/total_samples) %>% 
+  ungroup() %>% 
+  left_join(labels,by="Feature") %>% 
+  left_join(silva2,by="Feature") %>% 
+  mutate(Feature=if_else(Feature_Category=="Gaussian ASV",ASV_id,Feature)) %>% 
+  arrange(Feature_Category) %>% 
+    mutate(taxa_col=case_when(Feature_Category=="Phylum"~ "#00BA38",
+                            Feature_Category=="Family"~ "#01BFC4",
+                            Feature_Category=="Genus"~ "#629DFF",
+                            Feature_Category=="Gaussian ASV"~ "#F564E3")) 
+
+most2<-most %>%
+  group_by(Feature,taxa_lab2,no) %>% 
+  summarise() %>% 
+  ungroup() %>% 
+  arrange(no) %>% 
+  mutate(taxa_lab2=as.factor(taxa_lab2))
+taxa_labels<-most2$taxa_lab2
+
+
+most$Feature=factor(most$taxa_lab2, levels=most2$taxa_lab2)
+
+top50_pheno_all<-ggplot(data=most,
+            aes(x=age.floor,
+                y=prevalence,color=taxa_col))+
+  geom_point(aes(group=age.floor))+theme_bw()+
+  scale_color_manual(values=c("#00BA38","#01BFC4","#629DFF","#F564E3"))+
+  facet_wrap(~Feature, scales = "free",ncol=5)+
+  theme(strip.text.x = element_text(size = 7),
+        axis.text.x = element_text(color="black", size=10),
+        axis.title.x = element_text(color="black", size=15),
+        axis.title.y = element_text(color="black", size=15),
+        legend.position = "none")+
+  labs(x="Age",
+       y="Prevalance")
+top50_pheno_all
+ggsave(top50_pheno_all,filename = "../out/Figures/S3_Top50GausFeatures.png")
+```
+
+## Fig S3
+
+```{r MLsuite, fig.height=10,fig.width=10,fig.cap="Microbial clocks of aging from an ensemble of machine learning algorithms. Plots show predicted microbiome ages (age~m~) relative to the true, chronological age (age~c~) of the baboon at the time of sample collection. Points are colored by sex with yellow indicating a female sample and blue indicating a male sample. Grey dashed line indicates a 1-to-1 relationship between age~c~ and age~m~. Plot A is the output from an elastic net regression and plot B is the output of a Random Forest regression. Plots C and D show the estimates from Gaussian process regression, but the kernel input for model in plot D was customized to account for heteroskedasticity in the data."}
+ENR<-readRDS("../in/MLoutput_ENR.rds")
+R_sq_ENR<-summary(lm(age_mb~age_chrono,data=ENR))$adj.r.squared
+
+p.ENR<-ggplot(data=ENR, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_bw()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+geom_smooth(method = "lm",fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('male', 'female'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq_ENR,3)),parse=T,size=5)+
+  labs(title="Elastic Net Regression")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        panel.grid = element_blank(),
+        legend.title=element_blank())+labs(tag="A")
+
+RF<-readRDS("../in/MLoutput_RF.rds")
+R_sq_RF<-summary(lm(age_mb~age_chrono,data=RF))$adj.r.squared
+
+p.RFR<-ggplot(data=RF, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_bw()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+geom_smooth(method = "lm",fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('male', 'female'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq_RF,3)),parse=T,size=5)+
+  labs(title="Random Forest Regression")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        panel.grid = element_blank(),
+        legend.title=element_blank())+labs(tag="B")
+
+GPRonly<-readRDS("../in/MLoutput_GPRonly.rds")
+R_sq_GPR<-summary(lm(age_mb~age_chrono,data=GPRonly))$adj.r.squared
+
+p.GPR<-ggplot(data=GPRonly, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_bw()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+geom_smooth(method = "lm",fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('male', 'female'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq_GPR,3)),parse=T,size=5)+
+  labs(title="Gaussian Process Regression")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        panel.grid = element_blank(),
+        legend.title=element_blank())+labs(tag="C")
+
+GPRHet<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+R_sq<-summary(lm(age_mb~age_chrono,data=GPRHet))$adj.r.squared
+
+p.HGPR<-ggplot(data=GPRHet, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_bw()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+geom_smooth(method = "lm",fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('male', 'female'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq,3)),parse=T,size=5)+
+  labs(title="Gaussian Process Regression with heteroskedastic kernel")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        panel.grid = element_blank(),
+        legend.title=element_blank())+labs(tag="D")
+grid.arrange(p.ENR,p.RFR,p.GPR,p.HGPR,nrow=2,ncol=2) 
+plots<-(p.ENR+p.RFR)/(p.GPR+p.HGPR)
+ggsave(plot=plots,filename = "../out/Figures/S6_MLsuite.png",height=10,width=10,units="in",dpi=300)
+```
+
+```{r MLsuiteFORPRESENTATION, fig.height=10,fig.width=10,eval=F}
+ENR<-readRDS("../in/MLoutput_ENR.rds")
+R_sq_ENR<-summary(lm(age_mb~age_chrono,data=ENR))$adj.r.squared
+
+p.ENR<-ggplot(data=ENR, aes(x=age_chrono,y=age_mb))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21, alpha=0.5, color="#5F5C59")+
+  geom_smooth(method=lm, fill=NA,fullrange = F, size=1.5, color="#141301")+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq_ENR,3)),parse=T,size=6)+
+  labs(title="Elastic Net Regression")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank())+labs(tag="A")
+
+RF<-readRDS("../in/MLoutput_RF.rds")
+R_sq_RF<-summary(lm(age_mb~age_chrono,data=RF))$adj.r.squared
+
+p.RFR<-ggplot(data=RF, aes(x=age_chrono,y=age_mb))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21, alpha=0.5, color="#5F5C59")+
+  geom_smooth(method=lm, fill=NA,fullrange = F, size=1.5, color="#141301")+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq_RF,3)),parse=T,size=6)+
+  labs(title="Random Forest Regression")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank())+labs(tag="B")
+
+GPRonly<-readRDS("../in/MLoutput_GPRonly.rds")
+R_sq_GPR<-summary(lm(age_mb~age_chrono,data=GPRonly))$adj.r.squared
+
+p.GPR<-ggplot(data=GPRonly, aes(x=age_chrono,y=age_mb))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21, alpha=0.5, color="#5F5C59")+
+  geom_smooth(method=lm, fill=NA,fullrange = F, size=1.5, color="#141301")+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq_GPR,3)),parse=T,size=6)+
+  labs(title="Gaussian Process Regression")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank())+labs(tag="C")
+
+GPRHet<-readRDS("../../4_machinelearning/out/GaussianProcessModeling/H.PredictedAgeData.rds")
+R_sq<-summary(lm(age_mb~age_chrono,data=GPRHet))$adj.r.squared
+
+p.HGPR<-ggplot(data=GPRHet, aes(x=age_chrono,y=age_mb))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5,color="#5F5C59")+
+  geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5,color="#141301")+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
+  annotate("text",x=4.5,y=22,label=paste("R^2 == ",round(R_sq,3)),parse=T,size=6)+
+  labs(title="Gaussian Process Regression with heteroskedastic kernel")+
+  theme(plot.title = element_text(hjust=0.5,size=12),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank())+labs(tag="D")
+grid.arrange(p.ENR,p.RFR,p.GPR,p.HGPR,nrow=2,ncol=2) 
+plots<-(p.ENR+p.RFR)/(p.GPR+p.HGPR)
+ggsave(plot=plots,filename = "../out/Figures/S6_MLsuiteBW.png")
+```
+
+
+## Fig S4
+```{r ENRalpha, fig.cap="Comparing elastic net regression outputs for 200 different values of alpha. Mean absolute error is shown in blue, and adjusted R^2^ is shown in red. All other parameters were held constant."}
+knitr::include_graphics("../../4_machinelearning/out/graph_ENR_alphatrials.png")
+```
+
+
+
+## Fig S5
+```{r FeatureAnalysisComparison, fig.width=6,fig.height=4, fig.cap="Correlating the results from the linear mixed model analysis of features and the leave-one-out version of the machine learning algorithm. X-axis shows the difference in R^2^ from the algorithm without missing features to algorithms with selected missing features. Y-axis shows the linear coefficient for age produced when age is regressed on the feature of interest. Points represent all non-ASV features."}
+AllTaxa<-readRDS("../../9_thesischapter/in/GPRL1O_AllTaxaTable.rds") %>%  #all ready to go, but has pub ready names
+  rename(Feature=missing_feature) %>% select(-feature_type)
+AllTaxa$Feature<-gsub("betadiv_PC","Compositional PC",AllTaxa$Feature)
+
+age_gaussian_quad<-readRDS("../../9_thesischapter/out/GaussianLMMOutputClean.rds") 
+
+combo<-age_gaussian_quad %>% 
+  left_join(AllTaxa,by="Feature") %>% 
+  drop_na() #drops out the ASVs and NA taxonomies
+
+diff<-combo %>% 
+  filter(abs(diff)>0.005)
+
+#cor.test(combo$diff,combo$Estimate_linear,method = "pearson")
+
+ggplot(data=combo,aes(y=log2(diff),x=Estimate_linear))+geom_point(aes(color=Feature_Category))+
+  geom_smooth(method=lm,se=FALSE,aes(color=Feature_Category)) +
+  #geom_text(aes(label=ifelse(abs(diff)>0.005,as.character(Feature),'')),hjust=-.01,vjust=.01)+
+  theme_bw()+
+  coord_cartesian(clip = 'off') +
+  labs(y=bquote(Log[2]~Difference~`in`~R^2),x="Linear estimate")+theme(legend.position = "bottom", 
+                                                                       legend.title = element_blank(),
+                                                                       axis.text = element_text(size=16),
+                                                                       axis.title = element_text(size=20),
+                                                                       panel.grid = element_blank(),
+                                                                       legend.text = element_text(size=14))
+ggsave("../out/Figures/S7_FeatureAnalysisComparison_log2_trendline.png")
+
+```  
+
+## Fig S7
+```{r hetdiagnosis,fig.height=8,fig.width=8,fig.cap="Variance in residuals across lifespans in the Gaussian process regression prior to correction. Plots show chronological age relative to the residuals of the age~m~ produced by a Gaussian process regression with a radial basis function kernel. Females are in yellow, and males are in blue. (A) shows a scatter plot of age~c~ and the residuals of microbial age. As a host gets older, the spread of the residuals gets wider. (B) shows the distributions of the residuals at different age subsets. The distribution flattens around 12.5 in females and 10 in males. (C) shows the coefficient of variation of the residuals is especially high at the around 12.5 in females and 10 in males."}
+GPRonly<-readRDS("../in/MLoutput_GPRonly.rds") %>%  
+  mutate(bin=cut(age_chrono,breaks=c(seq(0,27.5,2.5))))
+males<-GPRonly %>% filter(sex=="M") %>% 
+  mutate(resid=resid(lm(age_mb~age_chrono)))
+females<-GPRonly %>% filter(sex=="F") %>% 
+  mutate(resid=resid(lm(age_mb~age_chrono)))
+CVs<-rbind(males,females) %>% 
+  group_by(sex,bin) %>% 
+  summarise(CV_resid=(sd(resid)/mean(resid))*100) %>% 
+  ungroup()
+
+femaleresid<-ggplot(data=females,aes(x=age_chrono,y=resid))+
+  geom_point(alpha=0.5,color='darkgoldenrod3')+
+  geom_abline(intercept = 0, slope = 0, linetype=2,colour="red")+
+  xlab("Chronological Age")+ylab("Residual")+theme_bw()+labs(tag="A")+
+  ggtitle("Females")+
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(color="black",size=16),
+        axis.title = element_text(color="black",size=20),
+        plot.title = element_text(size=24),
+        plot.tag = element_text(size=24))
+femaleresiddist<-ggplot(data=females,aes(x=resid))+
+  geom_histogram(position="identity", fill="darkgoldenrod3")+
+  ggtitle("Females")+
+  xlab("Residual")+ylab("Count")+
+  facet_wrap(~bin,ncol=3)+theme_bw()+labs(tag="C")+
+  theme(strip.text = element_text(size=18),
+        panel.grid = element_blank(),
+        axis.text = element_text(color="black",size=16),
+        axis.title = element_text(color="black",size=20),
+        plot.title = element_text(size=24),
+        plot.tag = element_text(size=24));
+#femaleCV<-ggplot(data=CVs[CVs$sex=="F",],aes(x=bin,y=CV_resid))+
+#  xlab("Age Bin")+ylab("CV of Residual")+
+#  ggtitle("CV of residuals across all females")+
+#  geom_bar(stat="identity",fill="darkgoldenrod3")+theme_bw()+labs(tag="C")
+
+
+maleresid<-ggplot(data=males,aes(x=age_chrono,y=resid))+
+  geom_point(alpha=0.5,color='#115163')+
+  geom_abline(intercept = 0, slope = 0, linetype=2,colour="red")+
+  xlab("Chronological Age")+ylab("Residual")+theme_bw()+labs(tag="B")+
+  ggtitle("Males")+
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(color="black",size=16),
+        axis.title = element_text(color="black",size=20),
+        plot.title = element_text(size=24),
+        plot.tag = element_text(size=24))
+maleresiddist<-ggplot(data=females,aes(x=resid))+
+  geom_histogram(position="identity", fill="#115163")+
+  xlab("Residual")+ylab("Count")+
+  ggtitle("Males")+
+  facet_wrap(~bin,ncol=3)+theme_bw()+labs(tag="D")+
+  theme(strip.text = element_text(size=18),
+        panel.grid = element_blank(),
+        axis.text = element_text(color="black",size=16),
+        axis.title = element_text(color="black",size=20),
+        plot.title = element_text(size=24),
+        plot.tag = element_text(size=24));
+#maleCV<-ggplot(data=CVs[CVs$sex=="M",],aes(x=bin,y=CV_resid))+
+#  xlab("Age Bin")+ylab("CV of Residual")+
+#  ggtitle("CV of residuals across all males")+
+#  geom_bar(stat="identity",fill="#115163")+theme_bw()+labs(tag="F")
+
+femaleresid+maleresid + femaleresiddist+maleresiddist +plot_layout(ncol = 2,nrow=2)
+ggsave(filename="../out/Figures/S5_hetdiagnosis.png",dpi=300,height=16,width=16,units="in")
+```
+
