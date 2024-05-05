@@ -19,7 +19,7 @@ thicc_border<-fp_border(color = "black", style = "solid", width = 2)
 ```
 
 # Figure 1
-```{r sampledatadist, fig.height=6, fig.width=8, fig.cap="Longitudinal fecal samples collected for (A) female and (B) male baboons in the Amboseli ecosystem. Host age at the time of sample collection is indicated on the x-axis and individual baboons are represented on the y-axis. Each point represents a fecal sample collected from an individual baboon. The fill color of each point reflects the subject's sexual maturation state, with lighter colors reflecting samples collected prior to menarche for females and prior to testicular enlargement for males (for more information on how these milestones are measured, see Table S5.8. Plot A contains 8,245 samples from 234 individual females. Plot B contains 5,231 samples from 197 individual males."}
+```{r sampledatadist, fig.cap="Longitudinal fecal samples collected for (A) female and (B) male baboons in the Amboseli ecosystem. Host age at the time of sample collection is indicated on the x-axis and individual baboons are represented on the y-axis. Each point represents a fecal sample collected from an individual baboon. The fill color of each point reflects the subject's sexual maturation state, with lighter colors reflecting samples collected prior to menarche for females and prior to testicular enlargement for males (for more information on how these milestones are measured, see Table S5.8. Plot A contains 8,245 samples from 234 individual females. Plot B contains 5,231 samples from 197 individual males."}
 #metadata file with all the EMP samples and ages
 metadata_random<-readRDS("../data/metadata_random.rds") %>% 
   mutate(age_matured=as.numeric((matured-birth)/365.25)) %>% 
@@ -105,7 +105,7 @@ males<-ggplot(H.PredLife[H.PredLife$sex=="M",], aes(x=reorder(sname,-sample_coun
 #make them into a single figure and save
 grid.arrange(females, males, ncol=2)
 sampledis<-grid.arrange(females, males, ncol=2)
-#ggsave(plot = sampledis, filename = "../out/Figures/SampleDistribution.png")
+ggsave(plot = sampledis, filename = "SampleDistribution.png",dpi=300)
 ```
 
 # Fig 2
@@ -532,7 +532,7 @@ bull
 
 # Fig 3
 ```{r gauproplot,fig.cap="A microbiome clock of aging in wild baboons. Plots show predicted microbiome age in years (age~m~) from a Gaussian process regression model, relative to each baboon's true, chronological age in years (age~c~) at the time of sample collection. (A) Shows a linear fit for all subjects in the model, and (B) shows separate linear fits for each sex. On each plot, the dashed lines indicate a 1-to-1 relationship between age~c~ and age~m~."}
-H.PredLife<-readRDS("../data/GaussianProcessModeling/H.PredictedAgeData.rds")
+H.PredLife<-readRDS("../data/H.PredictedAgeData.rds")
 count<-H.PredLife %>% 
   group_by(sname,sex) %>% 
   summarise(count=n()) %>% 
@@ -600,7 +600,7 @@ estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
   #xlim(0,25)+ylim(0,25)+
   xlab(bquote(Chronological~Age~In~Years~(age[c])))+
   ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
-  ggtitle("Measuring Age Acceleration")+
+  ggtitle(expression(paste("Measuring Microbiome ", Delta, "age")))+
   geom_segment(aes(x=0,y=14,xend=6,yend=14, color="segment"), 
                color = "red", linetype="dashed")+
   geom_segment(aes(x=6,y=-2.5,xend=6,yend=14, color="segment"), 
@@ -609,9 +609,9 @@ estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
   #annotate(geom = "text", x = 4, y = 16.75, size=6,
   #        label = bquote(Age~Accel.~`=`~Age[m]~`-`~Age[c]), 
   #         hjust = "left",color="red")+
-  annotate(geom = "text", x = 9.5, y = 12.25, size=6,
+  annotate(geom = "text", x = 7, y = 15.25, size=6,
            label = bquote(`(`~8~`=`~14~`-`~6~`)`),color="red")+
-  annotate(geom = "text", x = 6.6, y = 14.25, size=6, lineheight = .9,
+  annotate(geom = "text", x = 4, y = 17.25, size=6, lineheight = .9,
            label = "Individual is microbially \n old for age", hjust = "left",color="red")+
   geom_segment(aes(x=14,y=-2.5,xend=14,yend=6, color="segment"), 
                color = "blue", linetype="dashed")+
@@ -626,7 +626,7 @@ estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
   annotate(geom = "text", x = 14.25, y = 6.5, size=6, lineheight=0.9,
            label = "Individual is microbially \n young for age", hjust = "left",color="blue")+
   annotate(geom = "text", x = 8, y = 23, size=6,
-           label = bquote(Age~Accel.~`=`~Age[m]~`-`~Age[c]), hjust = "left",color="black")+labs(tag="C")+
+           label = bquote(Delta~age~`=`~Age[m]~`-`~Age[c]), hjust = "left",color="black")+labs(tag="C")+
   theme(axis.title=element_text(size=18),
         axis.text=element_text(size=16, color="black"),
         plot.title = element_text(size=18,color="black"),
@@ -636,68 +636,9 @@ estimatesageaccel<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb))+
         #plot.margin=unit(c(0,0,0,0.0), "cm"),
         legend.position = c(.2,.85), 
         legend.title=element_blank(),
-        plot.tag = element_text(size=20));
-PredLifeCov<-readRDS("../data/GaussianProcessModeling/out/PredictedAge_EnviroCov.rds")
-H.PredLife_F<-PredLifeCov %>% filter(sex=="F")
-H.PredLife_M<-PredLifeCov %>% filter(sex=="M")
-H.PredLife_F$resid_cov<-resid(lmer(age_mb~age_chrono+
-                                      avg_month_maxtemp+
-                                      sum_month_rain+
-                                      season+
-                                      (1|collect_grp)+
-                                      (1|hydroyear),
-                                    data=H.PredLife_F))
-H.PredLife_M$resid_cov<-resid(lmer(age_mb~age_chrono+
-                                      avg_month_maxtemp+
-                                      sum_month_rain+
-                                      season+
-                                      (1|collect_grp)+
-                                      (1|hydroyear),
-                                    data=H.PredLife_M))
-PredLifeCov<-rbind(H.PredLife_F,H.PredLife_M)
-
-estimatespace<-ggplot(data=PredLifeCov, aes(x=age_chrono,y=age_mb))+
-  theme_bw()+
-  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey33",size=1)+
-  geom_point(pch=21,alpha=0.1,color="#5F5C59")+
-  scale_x_continuous(expand=c(0,0))+
-  geom_point(data=PredLifeCov[PredLifeCov$sname=="RAN",],pch=21, alpha = 0.5, color="chocolate1", fill="chocolate1")+
-  geom_point(data=PredLifeCov[PredLifeCov$sname=="POK",],pch=21, alpha=0.5, color="chartreuse3", fill="chartreuse3")+
-  geom_smooth(method=lm, fill=NA,fullrange = F,size=1,color="#141301")+
-  geom_smooth(data=PredLifeCov[PredLifeCov$sname=="RAN",],method=lm, 
-              fill=NA,fullrange = F,size=1.5,color="chocolate1")+
-  geom_smooth(data=PredLifeCov[PredLifeCov$sname=="POK",],method=lm, 
-              fill=NA,fullrange = F,size=1.5,color="chartreuse3")+
-  ggtitle("Measuring Pace of Aging")+
-  xlab(bquote(Chronological~Age~In~Years~(age[c])))+
-  ylab(bquote(Predicted~Microbiome~Age~In~Years~(age[m])))+
-  annotate(geom = "curve", x = 8.0, y = 15.5, xend = 9, yend = 10.5,
-           curvature = .3, arrow = arrow(length = unit(2, "mm")), color="black",size=1) +
-  annotate(geom = "text", x = 6.5, y = 17, size=6,lineheight = .9,
-           label = "Individual has a faster pace of \n aging than is typical of the population", 
-           hjust = "left",color="chocolate3")+
-  annotate(geom = "curve", x = 15.5, y = 5, xend = 14.5, yend = 10,
-           curvature = .7, arrow = arrow(length = unit(2, "mm")), color="black",size=1) +
-  annotate(geom = "text", x = 8, y = 3.75, size=6,lineheight = .9,
-           label = "Individual has a slower pace of \n aging than is typical of the population", 
-           hjust = "left",color="chartreuse4") + 
-  annotate(geom = "text", x = 13.9, y = 22, size=6,lineheight = .5,
-           label = bquote(atop(Pace~of~Aging == ~individual~slope~from~phantom(),
-                      `lm`~`(`~age[m]~`~`~age[c]~`+`~environment~`+`~
-                        `(`~1~`+`~age[c]~`|`~individual~`))`)))+
-  labs(tag="D")+
-  theme(axis.title=element_text(size=18, color="black"),
-        axis.text=element_text(size=16, color="black"),
-        plot.title = element_text(size=18,color="black"),
-        #aspect.ratio=1,
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        legend.position = c(.2,.85), 
-        #plot.margin=unit(c(0,0,0,0), "cm"),
-        legend.title=element_blank(),
-        plot.tag = element_text(size=20));estimatespace
-grid.arrange(estimatesageaccel, estimatespace, ncol=2)
-plots<-arrangeGrob(estimatesageaccel,estimatespace,ncol=2)
+        plot.tag = element_text(size=20));estimatesageaccel
+#grid.arrange(estimatesageaccel, estimatespace, ncol=2)
+#plots<-arrangeGrob(estimatesageaccel,estimatespace,ncol=2)
 #ggsave(plot=plots,filename="../out/Figures/4A_ConceptualMetrics.png",width=11,height=5,dpi=300,units="in")
 ```
 
@@ -706,12 +647,11 @@ plots<-arrangeGrob(estimatesageaccel,estimatespace,ncol=2)
 sheep=ggdraw()+
   draw_plot(estimatesall, x=0, y=.5, width=.5,height = 0.5)+
   draw_plot(estimatessex, x=.5, y=.5, width=.5,height=0.5)+
-  draw_plot(estimatesageaccel, x=0, y=0, width=.5,height=0.5)+
-  draw_plot(estimatespace, x=.5, y=0, width=.5,height=0.5)
+  draw_plot(estimatesageaccel, x=0.3, y=0, width=.5,height=0.5)
 
 sheep
   
-#ggsave(plot=sheep,filename="../out/Figures/Fig3Sheep.png",width = 14, height = 14,units="in")
+ggsave(plot=sheep,filename="Fig3.pdf",width = 14, height = 14,units="in")
 ```
 
 # Fig 4
@@ -731,7 +671,7 @@ p.females<-ggplot(data=PredLifeCov_F,
                   aes(x=proprank,y=resid_life))+
   geom_jitter(alpha=0.5, color="darkgoldenrod3")+geom_smooth(method="lm", color="darkgoldenrod1")+
   xlab("Proportional Dominance Rank")+
-  ylab("Corrected Age Acceleration")+
+  ylab(expression(paste("Corrected Microbiome ", Delta, "age")))+
   theme_bw()+
   annotate("text",x=.7,y=11.25,label="n == 6736",
            parse=T,size=6)+
@@ -751,7 +691,7 @@ p.males<-ggplot(data=PredLifeCov_M,
                   aes(x=proprank,y=resid_life))+
   geom_jitter(alpha=0.5, color="#115163")+geom_smooth(method="lm", color="#3FBCDE")+
   xlab("Proportional Dominance Rank")+
-  ylab("Corrected Age Acceleration")+
+  ylab(expression(paste("Corrected Microbiome ", Delta, "age")))+
   theme_bw()+
   annotate("text",x=.7,y=12.25,label="n == 4341",
            parse=T,size=6)+
@@ -767,63 +707,9 @@ p.males<-ggplot(data=PredLifeCov_M,
         plot.tag = element_text(size=20),
         legend.title=element_blank())+labs(tag="B");
 
-slopes2<-readRDS("../data/metadata_slopes_life_and_breakpoints.rds")
-ranks<-readRDS("../data/rank_raw_adult_Feb2021.rds") %>% 
-  select(sname, collection_date, ordrank,proprank)
-
-slopes2_rank<-slopes2 %>% 
-  left_join(ranks,by=c("sname","collection_date")) %>% 
-  group_by(sname,sex,slope_life_1step) %>% 
-  summarise(avg_proprank=mean(proprank),
-         avg_ordrank=mean(ordrank)) %>% 
-  ungroup()
-
-
-  #mean(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step);sd(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step);
-  #min(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step);max(slopes2_rank[slopes2_rank$sex=="F",]$slope_life_1step)
-   #mean(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T);sd(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T);
-  #min(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T);max(slopes2_rank[slopes2_rank$sex=="M",]$slope_life_1step,na.rm=T)
-
-slopeplot_F<-ggplot(data=slopes2_rank[slopes2_rank$sex=="F",],aes(x=avg_proprank,y=slope_life_1step))+
-  geom_jitter(alpha=0.75, color="darkgoldenrod3")+geom_smooth(method="lm", color="darkgoldenrod1")+
-  xlab("Average Lifetime Proportional \n Dominance Rank")+
-  ylab("Pace of Aging")+
-  theme_bw()+
-  annotate("text",x=.7,y=.86,label="n == 188",
-           parse=T,size=6)+
-  annotate("text",x=.7,y=.82,label=expression(paste(beta," = - 0.172; ","p < 0.001")),
-           parse=T,size=6)+
-  ggtitle("Females")+
-  theme(plot.title = element_text(size=18),
-        axis.title=element_text(size=16,color="black"),
-        axis.text=element_text(size=12),
-        legend.position = c(.2,.85), 
-        panel.grid = element_blank(),
-        plot.tag = element_text(size=20),
-        aspect.ratio = 1,
-        legend.title=element_blank())+labs(tag="C");
-
-slopeplot_M<-ggplot(data=slopes2_rank[slopes2_rank$sex=="M",],aes(x=avg_proprank,y=slope_life_1step))+
-  geom_jitter(alpha=0.75, color="#115163")+#geom_smooth(method="lm", color="#3FBCDE")+
-  xlab("Average Lifetime Proportional \n Dominance Rank")+
-  ylab("Pace of Aging")+
-  theme_bw()+
-  annotate("text",x=.7,y=.89,label=paste("n == 161"),
-           parse=T,size=6)+
-  annotate("text",x=.7,y=.86,label=expression(paste(beta," = - 0.0002*; ","p = 0.766")),
-           parse=T,size=6)+
-  ggtitle("Males")+
-  theme(plot.title = element_text(size=18),
-        axis.title=element_text(size=16),
-        axis.text=element_text(size=12,color="black"),
-        panel.grid = element_blank(),
-        legend.position = c(.2,.85),
-        plot.tag = element_text(size=20), 
-        aspect.ratio = 1,
-        legend.title=element_blank())+labs(tag="D");
-plots<-(p.females+p.males)/(slopeplot_F+slopeplot_M)
+plots<-(p.females+p.males)
 plots
-#ggsave(plot=plots,filename="../out/Figures/4C_rankplots.png",height=11,width=11, units="in", dpi=300)
+ggsave(plot=plots,filename="Fig4.pdf",height=11,width=11, units="in", dpi=300)
 ```
 ```{r fig.height=11,fig.width=11}
 
@@ -833,7 +719,7 @@ season_females<-ggplot(data=PredLifeCov_F2,
   geom_jitter(alpha=0.75, color="darkgoldenrod3")+geom_boxplot(alpha=0.5)+
   theme_bw()+
   xlab("Season")+
-  ylab("Age Acceleration")+
+  ylab(expression(paste("Microbiome ", Delta, "age")))+
   annotate("text",x=1.5,y=23,label=paste("n == 192"),
            parse=T,size=5)+
   annotate("text",x=1.5,y=21.5,label=expression(paste(beta," = - 0.180; ","p = 0.021")),
@@ -866,7 +752,7 @@ drought_males<-ggplot(data=Male_EA,
   geom_jitter(alpha=0.75, color="#115163")+geom_boxplot(alpha=0.5)+
   theme_bw()+
   xlab("Drought")+
-  ylab("Corrected Age Acceleration")+
+  ylab(expression(paste("Corrected Microbiome ", Delta, "age")))+
   annotate("text",x=1.5,y=15,label=paste("n == 168"),
            parse=T,size=5)+
   annotate("text",x=1.5,y=13.75,label=expression(paste(beta," = - 0.451; ","p = 0.021")),
@@ -881,7 +767,7 @@ grpsize_males<-ggplot(data=Male_EA,
   geom_jitter(alpha=0.75, color="#115163")+geom_boxplot(alpha=0.5)+
   theme_bw()+
   xlab("High group size")+
-  ylab("Corrected Age Acceleration")+
+  ylab(expression(paste("Corrected Microbiome ", Delta, "age")))+
   annotate("text",x=1.5,y=15,label=paste("n == 168"),
            parse=T,size=5)+
   annotate("text",x=1.5,y=13.75,label=expression(paste(beta," =  0.471; ","p = 0.033")),
@@ -896,7 +782,7 @@ lowmatSCI_males<-ggplot(data=Male_EA,
   geom_jitter(alpha=0.75, color="#115163")+geom_boxplot(alpha=0.5)+
   theme_bw()+
   xlab("Low maternal social connectedness")+
-  ylab("Corrected Age Acceleration")+
+  ylab(expression(paste("Corrected Microbiome ", Delta, "age")))+
   annotate("text",x=1.5,y=15,label=paste("n == 168"),
            parse=T,size=5)+
   annotate("text",x=1.5,y=13.75,label=expression(paste(beta," = - 0.395; ","p = 0.006")),
@@ -909,7 +795,7 @@ lowmatSCI_males<-ggplot(data=Male_EA,
 plots2<-(season_females+drought_males)/(grpsize_males+lowmatSCI_males)
 plots2
 
-#ggsave(plot=plots2,filename="../out/Figures/4D_socioenviroplots.png")
+ggsave(plot=plots2,filename="4D_socioenviroplots.png")
 ```
 
 
