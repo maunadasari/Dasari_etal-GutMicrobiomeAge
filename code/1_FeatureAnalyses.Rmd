@@ -1,5 +1,5 @@
 ---
-title: "Phenotype Testing - Comparing Linear and Quadratic Models Across Lifespan"
+title: "Feature Analyses"
 author: "Mauna Dasari"
 output: 
   html_document:
@@ -33,410 +33,177 @@ theme2<-theme(
   plot.title=element_text(hjust=0.5, size=12))
 ```
 
----
+This file contains the code for the feature analyses and their related figures. 
 
 ```{r metadata_z_score, eval=T}
-metadata_raw<-readRDS("../../1_data/out/metadata_with_pc_points_and_diet.rds")
+metadata_raw<-readRDS("../data/metadata_full.rds")
+#z scoring relevant columns
 metadata_all<-metadata_raw%>%
     mutate(read_count.z=((read_count-mean(read_count, na.rm=T))/sd(read_count,na.rm=T)))%>%
     #mutate(age.years.z=((age.years - mean(age.years, na.rm=T))/sd(age.years,na.rm=T)))%>%
     mutate(rain_1moprior.z=((rain_1moprior-mean(rain_1moprior,na.rm=T))/sd(rain_1moprior,na.rm=T)))%>%
     mutate(rain_3moprior.z=((rain_3moprior-mean(rain_3moprior,na.rm=T))/sd(rain_3moprior,na.rm=T)))%>%
     mutate(rain_1yrprior.z=((rain_1yrprior-mean(rain_1yrprior,na.rm=T))/sd(rain_1yrprior, na.rm=T)))%>%
-    mutate(t_log=case_when(sex=="M"~as.numeric(t_log)))%>%
-    mutate(e2_log=case_when(sex=="F"~as.numeric(e2_log)))%>% #getting ready to standardize within sex
-    mutate(e2_log.z=(e2_log-mean(e2_log,na.rm=T))/sd(e2_log,na.rm=T))%>%
-    mutate(t_log.z=(t_log-mean(t_log,na.rm=T))/sd(t_log,na.rm=T))%>%
-    mutate(gc_log.z=(gc_log-mean(gc_log,na.rm=T))/sd(gc_log,na.rm=T))%>%
     mutate(diet_shannon_h.z=(diet_shannon_h-mean(diet_shannon_h,na.rm=T))/sd(diet_shannon_h,na.rm=T))%>%
-    mutate(diet_PC1.z=(diet_PC1-mean(diet_PC1,na.rm=T))/sd(diet_PC1,na.rm=T))%>%
-    mutate(diet_PC2.z=(diet_PC2-mean(diet_PC2,na.rm=T))/sd(diet_PC2,na.rm=T))%>%
-    mutate(diet_PC3.z=(diet_PC3-mean(diet_PC3,na.rm=T))/sd(diet_PC3,na.rm=T))%>%
-    mutate(diet_PC4.z=(diet_PC4-mean(diet_PC4,na.rm=T))/sd(diet_PC4,na.rm=T))%>%
-    mutate(diet_PC5.z=(diet_PC5-mean(diet_PC5,na.rm=T))/sd(diet_PC5,na.rm=T))%>%
-    mutate(e2_log.z=case_when(sex=="F"~as.numeric(e2_log.z), #setting NA = 0 to make sure model works
-                              sex=="M"~0))%>%
-    mutate(t_log.z=case_when(sex=="M"~as.numeric(t_log.z),
-                             sex=="F"~0))%>%
     dplyr::select(-c(matgrp,rain_3moprior,
                      bstatus,matgrp,sid,did,
-                     matgrp,day_of_collection,e2, gc,
-                     t,e2_log,t_log,gc_log,e2_date, t_date,
-                     gc_date,season,contains("diet_PC*")))
+                     matgrp,season))
 
 metadata<-metadata_all%>%
-  mutate(e2_log.z=case_when(sex=="F"~as.numeric(e2_log.z), #setting NA = 0 to make sure model works
-                              sex=="M"~0))%>%
-  mutate(t_log.z=case_when(sex=="M"~as.numeric(t_log.z),
-                              sex=="F"~0))%>%
-  mutate(matstate=case_when(collection_date>=matured~'adult',
-                            collection_date<matured~'juvenile',
-                            TRUE~'juvenile'))
-metadata$matstate<-factor(metadata$matstate,levels=c("juvenile","adult"))
-#saveRDS(metadata,"../out/microbiome16S_metadata.rds")
-```
-
-```{r metadata_no_z,eval=F}
-metadata_raw<-readRDS("../../1_data/out/metadata_with_pc_points_and_diet.rds")
-
-metadata<-metadata_raw%>%
-  mutate(e2_log=case_when(sex=="F"~as.numeric(e2_log), #setting NA = 0 to make sure model works
-                              sex=="M"~0))%>%
-  mutate(t_log=case_when(sex=="M"~as.numeric(t_log),
-                              sex=="F"~0))%>%
-  dplyr::select(-c(matgrp,collect_month,collect_year,grp_month,rain_3moprior,rain_6moprior,bstatus,matgrp,sid,did,matgrp,day_of_collection,e2,gc,t,e2_date, t_date, gc_date))%>%
   mutate(matstate=case_when(collection_date>=matured~'adult',
                             collection_date<matured~'juvenile',
                             TRUE~'juvenile'))
 metadata$matstate<-factor(metadata$matstate,levels=c("juvenile","adult"))
 ```
-
-```{r metadata_other}
-
-#For Jordan
-microbiome_sampleID_age<-metadata%>%
-  select(DADA_id,sname,age.years,sex)
-saveRDS(microbiome_sampleID_age, "../out/microbiome16S_sampleID_sname_age.rds")
-microbiome_sampleID<-microbiome_sampleID_age%>%
-  select(DADA_id)
-phylum<-readRDS("../../1_data/out/reads_phylum.rds")
-phylum$DADA_id<-rownames(phylum)
-family<-readRDS("../../1_data/out/reads_family.rds")
-family$DADA_id<-rownames(family)
-genus<-readRDS("../../1_data/out/reads_genus.rds")
-genus$DADA_id<-rownames(genus)
-genus<-readRDS("../../1_data/out/relabundance_genus_scaled.rds")
-genus$DADA_id<-rownames(genus)
-
-microbiome_sampleID_taxa_abundances<-merge(microbiome_sampleID,phylum, by="DADA_id")
-microbiome_sampleID_taxa_abundances<-merge(microbiome_sampleID_taxa_abundances,family, by="DADA_id")
-microbiome_sampleID_taxa_abundances<-merge(microbiome_sampleID_taxa_abundances,genus, by="DADA_id")
-saveRDS(microbiome_sampleID_taxa_abundances,"../out/microbiome16S_sampleID_taxa_abundances.rds")
-#microbiome_sampleID_taxa_abundances<-merge(microbiome_sampleID,genus, by="DADA_id")
-#saveRDS(microbiome_sampleID_taxa_abundances,"../out/microbiome16S_sampleID_genus_abundances.rds")
-#saveRDS(microbiome_sampleID_taxa_abundances,"../out/microbiome16S_sampleID_genus_abundances_scaled.rds")
-############
-## Phylum ##
-############
-phyla_list<-readRDS("../../1_data/out/Phyla_List.RDS")
-phyla_list_over50percent<-phyla_list%>%
-  filter(Samples_Containing_This_Phyla>=(18712*0.5))
-phyla_over50percent<-phyla_list_over50percent$taxa_phyla
-phyla_list_under50percent<-phyla_list%>%
-  filter(Samples_Containing_This_Phyla<=(18712*0.5))%>%
-  filter(Samples_Containing_This_Phyla>18712*0.02)
-phyla_under50percent<-phyla_list_under50percent$taxa_phyla
-phylum<-readRDS("../../1_data/out/phylum_prevalance_based.rds")
-metadata<-merge(metadata,phylum, by="DADA_id")
-
-############
-## Family ##
-############
-family_list<-readRDS("../../1_data/out/family_List.RDS")
-family_list_over50percent<-family_list%>%
-  filter(Samples_Containing_This_Family>=(18712*0.5))
-family_over50percent<-family_list_over50percent$taxa_family
-family_list_under50percent<-family_list%>%
-  filter(Samples_Containing_This_Family<(18712*0.5))%>%
-  filter(Samples_Containing_This_Family>18712*0.02)%>%
-  slice(-grep("Bacteria_Firmicutes_Bacillales_Thermoactinomycetaceae",taxa_family))
-family_under50percent<-family_list_under50percent$taxa_family
-
-family<-readRDS("../../1_data/out/family_prevalance_based.rds")
-metadata<-merge(metadata,family, by="DADA_id")
-
-###########
-## Genus ##
-###########
-genus_raw<-readRDS("../../1_data/out/reads_genus.rds")
-genus<-genus_raw
-genus$DADA_id<-rownames(genus)
-metadata<-merge(metadata,genus, by="DADA_id")
-
-genus_list<-readRDS("../../1_data/out/Genus_List.RDS")
-genus_75percent<-genus_list%>%
-  filter(Samples_Containing_This_Genus>=(18712*0.75))
-genus_over75percent<-genus_75percent$taxa_genus
-
-genus_under75percent_list<-genus_list%>%
-  filter(Samples_Containing_This_Genus<(18712*0.75))%>%
-  filter(Samples_Containing_This_Genus>18712*0.02)
-genus_under75percent<-genus_under75percent_list$taxa_genus
-
-################
-## Ordination ##
-################
-ordination_raw<-readRDS("../../2_beta/out/ordination_data_bstatus0.rds")
-ordination<-ordination_raw%>%
-  select(-c(contains("NMDS")))
-colnames(ordination)[2:ncol(ordination)] = paste0("betadiv_",colnames(ordination)[2:ncol(ordination)])
-betadiv_names<-colnames(ordination)[2:ncol(ordination)]
-metadata<-merge(metadata,ordination, by="DADA_id")
-metadata$plate<-as.factor(metadata$plate)
-
-metadata_M<-metadata%>%
-  filter(sex=='M')%>% #5259
-  drop_na(diet_PC1) #4972
-metadata_F<-metadata%>%
-  filter(sex=='F')%>% #8289
-  drop_na(diet_PC1) #7874
-
-repstate_raw<-readRDS("../../1_data/out/reprostate_raw.rds")
-repstate<-repstate_raw%>%
-    dplyr::select(tid,state)
-
-metadata_F<-merge(metadata_F,repstate, by="tid")%>%
-  mutate(state=case_when(state=="C"~"Cycling",
-                         state=="P"~"Pregnant",
-                         state=="L"~"Lactating",
-                         is.na(state)&sex=="F"&matstate=="juvenile"~"Immature"))
-metadata_F$repro<-paste(metadata_F$matstate, metadata_F$state, sep = "_")
-beep(2)
-#saveRDS(metadata_all, "../../1_data/out/metadata_all_diet_grp_rain_hormone_reads_bstatus_less_than_6month_zscored.rds")
-```
-
-To understand how different microbial phenotypes change with age, we're taking a model comparison approach. For each phenotype, I've run the model below and pulled out the estimate, p-value, and AIC for age (and, if applicable, age^2^):
-
-* Fixed Effects
-    + Read count 
-    + Age
-    + First 5 Diet PCs
-    + Rain 1 months prior to sample collection to account for fresh water vs watering holes
-    + Rain 1 year prior to sample collection as an estimation of environment quality
-    + Maturation state
-    + *Quadratic Models Only*: 
-        - Age^2^
-    + *Female Models Only*
-        - Reproductive State (matstate)
-* Random effects
-    + Group ID (grp_name)
-    + Sample plate (plate)
-    + Individual ID (sname)
     
+# Linear Model
+```{r eval=F, echo=T}
+raw_pres_abs_no_chl_mt<-readRDS("../../1_data/out/pres_abs_taxonomy_no_chl_mt.rds") 
+FeaturesOver25<-raw_pres_abs_no_chl_mt%>% 
+  select(ASVs,ASVSum) %>% 
+  mutate(Per_25to50=if_else(((ASVSum>=(ncol(raw_pres_abs_no_chl_mt)*.25)&(ASVSum<=(ncol(raw_pres_abs_no_chl_mt)*.5)))),T,F),
+         Over50=if_else((ASVSum>=(ncol(raw_pres_abs_no_chl_mt)*.5)),T,F)) %>% 
+  filter(Per_25to50==T|Over50==T)
+ASVsOver25<-FeaturesOver25$ASVs
 
-#Males {.tabset .tabset-pills}
-##Linear Models {.tabset}
-```{r M_linear_basic}
-phenotype<-c("richness","ShannonH","Simpson","Hill.q1","Hill.q2")
-phenotype<-c(phenotype,betadiv_names,phyla_over50percent, family_over50percent,genus_over75percent)
+gaussian_data<-features %>% 
+  select(FeaturesOver25$ASVs) %>% 
+  rownames_to_column("DADA_id") %>% 
+  right_join(metadata,by="DADA_id") %>% 
+  column_to_rownames("DADA_id")
 
-M_linear_basic<-lapply(phenotype, function(x){
-  print(x)
-  lmer(substitute(i~age.years+
+models_gaussian<-pblapply(FeaturesOver25$ASVs, function(x){
+  tryCatch(lmer(substitute(i~age_chrono+
                     read_count.z+
-                    rain_1moprior.z+
-                    rain_1yrprior.z+
-                    diet_PC1.z+
-                    diet_PC2.z+
-                    diet_PC3.z+
-                    diet_PC4.z+
-                    diet_PC5.z+
-                    (1|sname)+(1|plate)+(1|grp_name),
-              list(i=as.name(x))),data=metadata_M)
-}) 
-summaries_M_linear_basic<-lapply(M_linear_basic, summary)
-AIC_M_linear_basic_list<-lapply(M_linear_basic,AIC)
+                    rain.z+
+                    temp.z+
+                    season+
+                    (1|sname)+(1|plate)+(1|collect_grp)+(1|hydroyear),
+              list(i=as.name(x))),data=gaussian_data))
+})
+summaries_models_gaussian<-lapply(models_gaussian, summary)
+AIC_models_gaussian_list<-lapply(models_gaussian,AIC)
 
-Estimate_M_linear_basic<-vector(mode="numeric",length=length(phenotype))
-SE_M_linear_basic<-vector(mode="numeric",length=length(phenotype))
-P_value_M_linear_basic<-vector(mode="numeric",length=length(phenotype))
-AIC_M_linear_basic<-vector(mode="numeric",length=length(phenotype))
-distribution_type<-rep("gaussian",times=length(phenotype))
+SE_models_gaussian<-vector(mode="numeric", length=length(FeaturesOver25$ASVs))
+Estimate_models_gaussian<-vector(mode="numeric", length=length(FeaturesOver25$ASVs))
+P_value_models_gaussian<-vector(mode="numeric", length=length(FeaturesOver25$ASVs))
+AIC_models_gaussian<-vector(mode="numeric", length=length(FeaturesOver25$ASVs))
 
-for (i in 1:length(phenotype)){
-summaries2<-map(summaries_M_linear_basic,"coefficients")
+for (i in seq_along(FeaturesOver25$ASVs)){
+summaries2<-map(summaries_models_gaussian,"coefficients")
 summary<-as.data.frame(summaries2[[i]])
-Estimate_M_linear_basic[i]<-summary[2,1]
-SE_M_linear_basic[i]<-summary[2,2]
-P_value_M_linear_basic[i]<-summary[2,5]
-AIC_M_linear_basic[i]<-AIC_M_linear_basic_list[[i]]
+Estimate_models_gaussian[i]<-summary[2,1]
+SE_models_gaussian[i]<-summary[2,2]
+P_value_models_gaussian[i]<-summary[2,5]
+AIC_models_gaussian[i]<-AIC_models_gaussian_list[[i]]
 }
-age_linear_basic<-as.data.frame(cbind(phenotype,
-                                      Estimate_M_linear_basic,
-                                      SE_M_linear_basic,
-                                      P_value_M_linear_basic,
-                                      distribution_type))
-colnames(age_linear_basic)[colnames(age_linear_basic)=="Estimate_M_linear_basic"] <- "Estimate";
-colnames(age_linear_basic)[colnames(age_linear_basic)=="P_value_M_linear_basic"] <- "p_value";
-colnames(age_linear_basic)[colnames(age_linear_basic)=="SE_M_linear_basic"] <- "SE";
 
-saveRDS(age_linear_basic,"../out/ModelComparison_male_basic_linear.rds")
+age_gaussian<-as.data.frame(cbind(FeaturesOver25$ASVs,
+                                  Estimate_models_gaussian,
+                                  SE_models_gaussian,
+                                  P_value_models_gaussian))
+colnames(age_gaussian)[colnames(age_gaussian)=="Estimate_models_gaussian"] <- "Estimate";
+colnames(age_gaussian)[colnames(age_gaussian)=="SE_models_gaussian"] <- "SE";
+colnames(age_gaussian)[colnames(age_gaussian)=="P_value_models_gaussian"] <- "p_value";
+
+#othergaus<-readRDS("../out/FeatureAnalysis_LMM_L1O_gaussian.rds")
+
+#saveRDS(fullgaus,"../out/FeatureAnalysis_LMM_gaussian_inclASVs25to50.rds")
 ```
 
+# Quadratic Model
+```{r eval=F, echo=T}
+raw_pres_abs_no_chl_mt<-readRDS("../data/pres_abs_taxonomy_no_chl_mt.rds") 
+FeaturesOver25<-raw_pres_abs_no_chl_mt%>% 
+  select(ASVs,ASVSum) %>% 
+  mutate(Per_25to50=if_else(((ASVSum>=(ncol(raw_pres_abs_no_chl_mt)*.25)&(ASVSum<=(ncol(raw_pres_abs_no_chl_mt)*.5)))),T,F),
+         Over50=if_else((ASVSum>=(ncol(raw_pres_abs_no_chl_mt)*.5)),T,F)) %>% 
+  filter(Per_25to50==T|Over50==T)
+ASVsOver25<-FeaturesOver25$ASVs
 
-##Quadratic Models {.tabset }
+gaussian_data<-features %>% 
+  select(FeaturesOver25$ASVs) %>% 
+  rownames_to_column("DADA_id") %>% 
+  right_join(metadata,by="DADA_id") %>% 
+  column_to_rownames("DADA_id")%>% 
+  mutate(age_sq=age_chrono^2)
 
-```{r M_quad_basic, eval=F}
-metadata_M$age.squared<-(as.numeric(metadata_M$age.years))^2
-
-M_quad_basic<-lapply(phenotype, function(x){
-  lmer(substitute(i~age.years+
-                    age.squared+
+models_gaussian<-pblapply(FeaturesOver25$ASVs, function(x){
+  tryCatch(lmer(substitute(i~age_chrono+
+                             age_sq+
                     read_count.z+
-                    rain_1moprior.z+
-                    rain_1yrprior.z+
-                    diet_PC1.z+
-                    diet_PC2.z+
-                    diet_PC3.z+
-                    diet_PC4.z+
-                    diet_PC5.z+
-                    (1|sname)+(1|plate)+(1|grp_name),
-              list(i=as.name(x))),data=metadata_M)
+                    rain.z+
+                    temp.z+
+                    season+
+                    (1|sname)+(1|plate)+(1|collect_grp)+(1|hydroyear),
+              list(i=as.name(x))),data=gaussian_data))
 })
-summaries_M_quad_basic<-lapply(M_quad_basic, summary)
-AIC_M_quad_basic_list<-lapply(M_quad_basic,AIC)
+summaries_models_gaussian<-lapply(models_gaussian, summary)
+AIC_models_gaussian_list<-lapply(models_gaussian,AIC)
 
-Estimate_M_quad_basic<-vector(mode="numeric",length=length(phenotype))
-P_value_M_quad_basic<-vector(mode="numeric",length=length(phenotype))
-Term_A<-vector(mode="character",length=length(phenotype))
-Term_B<-vector(mode="character",length=length(phenotype))
-SE_M_quad_basic<-vector(mode="character",length=length(phenotype))
-AIC_M_quad_basic<-vector(mode="numeric",length=length(phenotype))
-distribution_type<-rep("gaussian",times=length(phenotype))
+Estimate_models_gaussian<-vector(mode="numeric",length=length(FeaturesOver25$ASVs))
+P_value_models_gaussian<-vector(mode="numeric",length=length(FeaturesOver25$ASVs))
+Term_A<-vector(mode="character",length=length(FeaturesOver25$ASVs))
+Term_B<-vector(mode="character",length=length(FeaturesOver25$ASVs))
+SE_models_gaussian<-vector(mode="character",length=length(FeaturesOver25$ASVs))
+AIC_models_gaussian<-vector(mode="numeric",length=length(FeaturesOver25$ASVs))
 
-for (i in 1:length(phenotype)){
-summaries2<-map(summaries_M_quad_basic,"coefficients")
+for (i in 1:length(FeaturesOver25$ASVs)){
+summaries2<-map(summaries_models_gaussian,"coefficients")
 summary<-as.data.frame(summaries2[[i]])
-Estimate_M_quad_basic[i]<-summary[2,1]
-P_value_M_quad_basic[i]<-summary[2,5]
+Estimate_models_gaussian[i]<-summary[2,1]
+P_value_models_gaussian[i]<-summary[2,5]
 rownames<-rownames(summary)
 Term_A[i]<-rownames[2]
-SE_M_quad_basic[i]<-summary[2,2]
-AIC_M_quad_basic[i]<-AIC_M_quad_basic_list[[i]]
+SE_models_gaussian[i]<-summary[2,2]
+AIC_models_gaussian[i]<-AIC_models_gaussian_list[[i]]
 }
-M_quad_basic_age<-as.data.frame(cbind(Term_A,
-                                      phenotype,
-                                      Estimate_M_quad_basic,
-                                      SE_M_quad_basic,
-                                      P_value_M_quad_basic,
-                                      distribution_type))
-colnames(M_quad_basic_age)[colnames(M_quad_basic_age)=="Estimate_M_quad_basic"] <- "Estimate_A";
-colnames(M_quad_basic_age)[colnames(M_quad_basic_age)=="P_value_M_quad_basic"] <- "p_value_A";
-colnames(M_quad_basic_age)[colnames(M_quad_basic_age)=="SE_M_quad_basic"] <- "SE_A";
+age_quad<-as.data.frame(cbind(Term_A,FeaturesOver25$ASVs,Estimate_models_gaussian,SE_models_gaussian,P_value_models_gaussian))
+colnames(age_quad)[colnames(age_quad)=="Estimate_models_gaussian"] <- "Estimate_A";
+colnames(age_quad)[colnames(age_quad)=="P_value_models_gaussian"] <- "p_value_A";
+colnames(age_quad)[colnames(age_quad)=="SE_models_gaussian"] <- "SE_A";
+colnames(age_quad)[colnames(age_quad)=="V2"] <- "Feature";
 
-for (j in 1:length(phenotype)){
-summaries2<-map(summaries_M_quad_basic,"coefficients")
+for (j in 1:length(FeaturesOver25$ASVs)){
+summaries2<-map(summaries_models_gaussian,"coefficients")
 summary<-as.data.frame(summaries2[[j]])
-Estimate_M_quad_basic[j]<-summary[3,1]
-P_value_M_quad_basic[j]<-summary[3,5]
-SE_M_quad_basic[i]<-summary[3,2]
+Estimate_models_gaussian[j]<-summary[3,1]
+P_value_models_gaussian[j]<-summary[3,5]
+SE_models_gaussian[i]<-summary[3,2]
 rownames<-rownames(summary)
 Term_B[j]<-rownames[3]
 }
-M_quad_basic_age.sq<-as.data.frame(cbind(Term_B,
-                                         phenotype,
-                                         Estimate_M_quad_basic,
-                                         SE_M_quad_basic,
-                                         P_value_M_quad_basic,
-                                         distribution_type))
-colnames(M_quad_basic_age.sq)[colnames(M_quad_basic_age.sq)=="Estimate_M_quad_basic"] <- "Estimate_B";
-colnames(M_quad_basic_age.sq)[colnames(M_quad_basic_age.sq)=="P_value_M_quad_basic"] <- "p_value_B";
-colnames(M_quad_basic_age.sq)[colnames(M_quad_basic_age.sq)=="SE_M_quad_basic"] <- "SE_B";
+age_quad.sq<-as.data.frame(cbind(Term_B,FeaturesOver25$ASVs,Estimate_models_gaussian,SE_models_gaussian,P_value_models_gaussian))
+colnames(age_quad.sq)[colnames(age_quad.sq)=="Estimate_models_gaussian"] <- "Estimate_B";
+colnames(age_quad.sq)[colnames(age_quad.sq)=="P_value_models_gaussian"] <- "p_value_B";
+colnames(age_quad.sq)[colnames(age_quad.sq)=="SE_models_gaussian"] <- "SE_B";
+colnames(age_quad.sq)[colnames(age_quad.sq)=="V2"] <- "Feature";
 
-M_quad_basic<-merge(M_quad_basic_age,M_quad_basic_age.sq, by=c("phenotype","distribution_type"))
-saveRDS(M_quad_basic,"Ch1/out/ModelComparison_male_basic_quad1.rds")
+age_quad2<-merge(age_quad,age_quad.sq, by="Feature")
+
+saveRDS(age_quad2,"../data/FeatureAnalysisResults_quad.rds")
 ```
 
-#Females {.tabset .tabset-pills}
-##Linear Models {.tabset }
-
-```{r F_linear_basic}
-
-F_linear_basic<-lapply(phenotype, function(x){
-  lmer(substitute(i~age.years+
-                    read_count+
-                    rain_1moprior+
-                    rain_1yrprior+
-                    matstate+
-                    diet_PC1+
-                    diet_PC2+
-                    diet_PC3+
-                    diet_PC4+
-                    diet_PC5+
-                    (1|sname)+(1|plate)+(1|grp_name),
-              list(i=as.name(x))),data=metadata_F)
-}) 
-summaries_F_linear_basic<-lapply(F_linear_basic, summary)
-AIC_F_linear_basic_list<-lapply(F_linear_basic,AIC)
-
-Estimate_F_linear_basic<-vector(mode="numeric",length=length(phenotype))
-SE_F_linear_basic<-vector(mode="numeric",length=length(phenotype))
-P_value_F_linear_basic<-vector(mode="numeric",length=length(phenotype))
-AIC_F_linear_basic<-vector(mode="numeric",length=length(phenotype))
-
-for (i in 1:length(phenotype)){
-summaries2<-map(summaries_F_linear_basic,"coefficients")
-summary<-as.data.frame(summaries2[[i]])
-Estimate_F_linear_basic[i]<-summary[2,1]
-SE_F_linear_basic[i]<-summary[2,2]
-P_value_F_linear_basic[i]<-summary[2,5]
-AIC_F_linear_basic[i]<-AIC_F_linear_basic_list[[i]]
-}
-age_linear_basic<-as.data.frame(cbind(phenotype,Estimate_F_linear_basic,SE_F_linear_basic,P_value_F_linear_basic))
-colnames(age_linear_basic)[colnames(age_linear_basic)=="Estimate_F_linear_basic"] <- "Estimate";
-colnames(age_linear_basic)[colnames(age_linear_basic)=="P_value_F_linear_basic"] <- "p_value";
-```
-
-## Quadratic Model
-
-```{r F_quad_basic}
-metadata_F$age.squared<-(as.numeric(metadata_F$age.years))^2
-
-F_quad_basic<-lapply(phenotype, function(x){
-  lmer(substitute(i~age.years+
-                    age.squared+
-                    read_count+
-                    rain_1moprior+
-                    rain_1yrprior+
-                    repro+
-                    diet_PC1+
-                    diet_PC2+
-                    diet_PC3+
-                    diet_PC4+
-                    diet_PC5+
-                    (1|sname)+(1|plate)+(1|grp_name),
-              list(i=as.name(x))),data=metadata_F)
-})
-summaries_F_quad_basic<-lapply(F_quad_basic, summary)
-AIC_F_quad_basic_list<-lapply(F_quad_basic,AIC)
-
-Estimate_F_quad_basic<-vector(mode="numeric",length=length(phenotype))
-P_value_F_quad_basic<-vector(mode="numeric",length=length(phenotype))
-Term<-vector(mode="character",length=length(phenotype))
-AIC_F_quad_basic<-vector(mode="numeric",length=length(phenotype))
-
-for (i in 1:length(phenotype)){
-summaries2<-map(summaries_F_quad_basic,"coefficients")
-summary<-as.data.frame(summaries2[[i]])
-Estimate_F_quad_basic[i]<-summary[2,1]
-P_value_F_quad_basic[i]<-summary[2,5]
-rownames<-rownames(summary)
-Term[i]<-rownames[2]
-AIC_F_quad_basic[i]<-AIC_F_quad_basic_list[[i]]
-}
-age_quad_basic_age<-as.data.frame(cbind(Term_A,phenotype,Estimate_F_quad_basic,P_value_F_quad_basic))
-colnames(age_quad_basic_age)[colnames(age_quad_basic_age)=="Estimate_F_quad_basic"] <- "Estimate_A";
-colnames(age_quad_basic_age)[colnames(age_quad_basic_age)=="P_value_F_quad_basic"] <- "p_value_A";
-
-
-for (j in 1:length(phenotype)){
-summaries2<-map(summaries_F_quad_basic,"coefficients")
-summary<-as.data.frame(summaries2[[j]])
-Estimate_F_quad_basic[j]<-summary[3,1]
-P_value_F_quad_basic[j]<-summary[3,5]
-rownames<-rownames(summary)
-Term[j]<-rownames[3]
-}
-age_quad_basic_age.sq<-as.data.frame(cbind(Term_B,phenotype,Estimate_F_quad_basic,P_value_F_quad_basic))
-colnames(age_quad_basic_age.sq)[colnames(age_quad_basic_age.sq)=="Estimate_F_quad_basic"] <- "Estimate_B";
-colnames(age_quad_basic_age.sq)[colnames(age_quad_basic_age.sq)=="P_value_F_quad_basic"] <- "p_value_B";
-
-age_quad_basic_F<-merge(age_quad_basic_age,age_quad_basic_age.sq, by="phenotype")
-```
-
-#Relative Abundance Plots
+# Plots
+## Relative Abundance Plots
 ```{r fig.height=8,fig.width=16}
-relab_phylum_long<-readRDS("../../1_data/out/relabundance_long_phyla_nochl.rds") %>% 
+#Make some relative abundance tables
+reads_taxonomy<-readRDS("../data/reads_taxonomy.rds")
+
+reads_phylum_long<-reads_taxonomy%>%
+  group_by(taxa_phyla)%>%
+  select(-c(taxa_order,taxa_genus,taxa_family)) %>% 
+  gather(key=sample_ID, value=count,-taxa_phyla, -ASVs) %>%
+  filter(!grepl("Chloroplast",taxa_phyla)) %>% 
+  filter(taxa_phyla!="Bacteria_Cyanobacteria") %>% 
+  select(-ASVs) %>% 
+  group_by(sample_ID,taxa_phyla)%>%
+  summarize(count=sum(count)) %>%  #count all the taxa in that group
+  mutate(rel_abundance = count / sum(count))%>% #calculate the relative abundance of all the taxa in that sample
+  ungroup()
+#saveRDS(reads_phylum_long,"../data/relabundance_long_phyla_nochl.rds")
+
+relab_phylum_long<-reads_phylum_long%>% 
   filter(!grepl("Chloroplast",taxa_phyla)) %>% 
   filter(taxa_phyla!="Bacteria_Cyanobacteria") %>% 
   group_by(sample_ID) %>% 
@@ -446,7 +213,7 @@ relab_phylum_long<-readRDS("../../1_data/out/relabundance_long_phyla_nochl.rds")
   mutate(taxa_phyla=gsub(pattern = "_",replacement = "/",taxa_phyla))
 
 #bring in the metadata
-metadata_random<-readRDS("../../4_machinelearning/out/metadata_random.rds") %>% 
+metadata_random<-readRDS("../data/metadata_full.rds") %>% 
   mutate(age_matured=as.numeric((matured-birth)/365.25)) %>% 
   filter(collect_grp<3) %>% 
   select(DADA_id,sname,age.years, statdate, status,birth,sex) %>% 
@@ -485,7 +252,7 @@ p2a_relabunF<-relab_phylum_long2 %>%
         plot.tag=element_text(size=44),
         plot.title=element_text(size=42),
         legend.position = "none");p2a_relabunF
-ggsave(plot=p2a_relabunF, filename = "../out/Figures/RelAbunPhylumF.png",width = 16, height=8, units="in",dpi=300)
+#ggsave(plot=p2a_relabunF, filename = "../Figures/RelAbunPhylumF.png",width = 16, height=8, units="in",dpi=300)
 
 #males
 p2b_relabunM<-relab_phylum_long2 %>% 
@@ -505,25 +272,24 @@ p2b_relabunM<-relab_phylum_long2 %>%
         plot.title=element_text(size=42),
         legend.position = "right",
         legend.key.width=unit(1,"cm"));p2b_relabunM
-ggsave(plot=p2b_relabunM, filename = "../out/Figures/RelAbunPhylumM.png",width = 18, height=8, units="in",dpi=300)
+#ggsave(plot=p2b_relabunM, filename = "../Figures/RelAbunPhylumM.png",width = 18, height=8, units="in",dpi=300)
 ```
 
 ``````{r fig.height=10,fig.width=35}
 library(ggpubr)
 ggarrange(p2A, p2B, ncol=2, nrow=1)   
-ggsave("../out/Figures/2AB_RelAbunPhylum.png")
-###
+#ggsave("../Figures/2AB_RelAbunPhylum.png")
 ```
 
-#Barplots
+## Barplots
 ```{r fig.height=6,fig.width=15}
-age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_meancentered_May21.rds")
+age_gaussian_quad<-readRDS("../data/FeatureAnalysisResults_quad.rds")
 #age_gaussian_quad<-readRDS("../../5_feature-analyses/out/FeatureAnalysis_LMM_L1O_gaussian_quad_inclASVs25to50.rds")
 colnames(age_gaussian_quad)<-gsub("_A","_linear",colnames(age_gaussian_quad));
 colnames(age_gaussian_quad)<-gsub("_B","_quad",colnames(age_gaussian_quad));
 colnames(age_gaussian_quad)<-gsub("Term","Age",colnames(age_gaussian_quad));
 
-gaussian_features<-as.data.frame(readRDS("../../4_machinelearning/out/phenotype_types.rds")) %>% 
+gaussian_features<-as.data.frame(readRDS("../data/phenotype_types.rds")) %>% 
   mutate(Feature=as.character(phenotype_names)) %>% select(-phenotype_names)
 gaussian_features2<-gaussian_features
 gaussian_features2[gaussian_features2=="ASV"]<-"Gaussian ASV"
@@ -537,11 +303,6 @@ gaussian<-age_gaussian_quad %>%
          p_quad_adj=p.adjust(p_value_quad, method="BH")) %>% 
   select(-matches("Age"))
 
-binomial<-readRDS("../../5_feature-analyses/out/binomial_features_BHadjusted2_wide.rds") %>% 
-  mutate(p_linear_adj=p.adjust(p_value_linear, method="BH"),
-         p_quad_adj=p.adjust(p_value_quad, method="BH"))
-all_features<-rbind(gaussian,binomial)
-
 AllSigFeatures<-all_features %>% 
   mutate(Significance_linear = if_else(p_linear_adj<=0.05,T,F),
          Significance_quad = if_else(p_quad_adj<=0.05,T,F)) 
@@ -551,7 +312,7 @@ AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="alpha_diversit
 AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="phylum"]<-"Phylum"
 AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="family"]<-"Family"
 AllSigFeatures$Feature_Category[AllSigFeatures$Feature_Category=="genus"]<-"Genus"
-feature_levels<-c("Alpha Diversity","Composition", "Phylum", "Family", "Genus", "Gaussian ASV", "Binomial ASV")
+feature_levels<-c("Alpha Diversity","Composition", "Phylum", "Family", "Genus", "Gaussian ASV")
 AllSigFeatures$Feature_Category<-factor(AllSigFeatures$Feature_Category, 
                                               levels=feature_levels)
 GausSigFeatures<-AllSigFeatures %>% 
@@ -569,7 +330,7 @@ GausSigLinear<-GausSigFeatures %>%
   slice(1:25,nrow(GausSigFeatures):(nrow(GausSigFeatures)-24)) %>% #removed for rds output below
   select(Feature,Feature_Category,Estimate_linear,SE_linear,p_linear_adj,Estimate_quad,SE_quad,p_quad_adj)
 
-silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+silva<-readRDS("../data/ASVs_silva_assigned.rds") %>% 
   select(ASV,ASV_id,starts_with("taxa_")) %>% 
   rename(Feature=ASV)
 
@@ -644,7 +405,7 @@ p2C_communityestimates <- ggplot(communitymetrics, aes(x=rev(no), y=Estimate_lin
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank())+
   coord_flip()+labs(tag="C");p2C_communityestimates
-ggsave(plot=p2C_communityestimates,filename = "../out/Figures/2C_CommunityEstimates.png",height=6,width=15,dpi=300,units="in")
+#ggsave(plot=p2C_communityestimates,filename = "../Figures/2C_CommunityEstimates.png",height=6,width=15,dpi=300,units="in")
 ```
 
 ```{r fig.height=21,fig.width=18}
@@ -665,17 +426,17 @@ p2E_gausestimates <- ggplot(taxametrics, aes(x=rev(no), y=Estimate_linear)) +
         plot.tag=element_text(size=44),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank()); p2E_gausestimates
-ggsave(plot=p2E_gausestimates,filename = "../out/Figures/2E_Gaussian50Estimates.png", height=21,width=18,units="in", dpi=300)
+#ggsave(plot=p2E_gausestimates,filename = "../out/Figures/2E_Gaussian50Estimates.png", height=21,width=18,units="in", dpi=300)
 ```
 
-# Facet Plots
+## Facet Plots
 ```{r fig.height=12,fig.width=22}
-ordination<-readRDS("../../2_beta/out/ordination_data_bstatus0.rds") %>% 
+ordination<-readRDS("../../2_beta/out/ordination_data.rds") %>% 
   select(DADA_id, starts_with("PC")) %>% 
   select(-c(PC3,PC9,PC10))
 colnames(ordination)<-c("DADA_id",paste("PC ",seq(1:2),"*",sep=""),paste("PC ",4:8,"*",sep=""))
 
-cow_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+cow_metadata<-readRDS("../data/metadata_full.rds") %>% 
   rename(age_chrono=age.years) %>%
   select(DADA_id,age_chrono,ShannonH,Simpson,Hill.q1,Hill.q2) %>% 
   rename("Hill No. 1*"=Hill.q1,
@@ -719,11 +480,11 @@ p2D_communityage<-ggplot(data=most,
         panel.grid.minor = element_blank())+
   labs(x="Age (years)",
        y="Average Value");p2D_communityage
-ggsave(plot=p2D_communityage, filename = "../out/Figures/2D_CommunityMetricsAge.png",height=12,width=22,units="in",dpi=300)
+#ggsave(plot=p2D_communityage, filename = "../Figures/2D_CommunityMetricsAge.png",height=12,width=22,units="in",dpi=300)
 ```
 
 ```{r fig.height=20,fig.width=22}
-silva<-readRDS("../../1_data/out/ASVs_silva_assigned_extendedMay21.rds") %>% 
+silva<-readRDS("../../1_data/out/ASVs_silva_assigned.rds") %>% 
   select(ASV,ASV_id,starts_with("taxa_")) %>% 
   rename(Feature=ASV)
 silva2<-silva %>% select(Feature,ASV_id)
@@ -733,12 +494,12 @@ top50features<-metricsgauss_linear %>%
   arrange(Estimate_linear) 
 
 top50features_list<-top50features$Feature
-phenotypes_readcount_raw<-readRDS('../../4_machinelearning/out/phenotypes_readcounts_no_chl_mt.rds')
+phenotypes_readcount_raw<-readRDS('../data/phenotypes_readcounts_no_chl_mt.rds')
 phenotypes_readcount<-phenotypes_readcount_raw%>%
   column_to_rownames("DADA_id")
 phenotypes_readcount[phenotypes_readcount>0]<-1
 
-duck_metadata<-readRDS("../../4_machinelearning/out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+duck_metadata<-readRDS("../data/metadata_full.rds") %>% 
   rename(age_chrono=age.years) %>% select(DADA_id,age_chrono)
 
 filtered_phenotypes_top50<-phenotypes_readcount%>%
@@ -818,10 +579,10 @@ p2F_gausage<-ggplot(data=most,
         panel.grid = element_blank())+
   labs(x="Age (years)",
        y="Prevalance");p2F_gausage
-ggsave(plot=p2F_gausage,filename = "../out/Figures/S3_Top50GausFeatures_noASV.png",height=20,width=22,dpi=300, units="in")
+#ggsave(plot=p2F_gausage,filename = "../Figures/S3_Top50GausFeatures_noASV.png",height=20,width=22,dpi=300, units="in")
 ```
 
-# Combined Plot
+## Combined Plot
 ```{r}
 cow=ggdraw()+
   draw_plot(p2a_relabunF, x=0, y=.8, width=.48,height = 0.18)+
@@ -833,7 +594,7 @@ cow=ggdraw()+
 
 cow
   
-ggsave(plot=cow,filename="../out/Figures/Fig2CowTest.png",width = 40, height = 35,units="in")
+#ggsave(plot=cow,filename="../Figures/Fig2CowTest.png",width = 40, height = 35,units="in")
 
 bull=ggdraw()+
   draw_plot(p2a_relabunF, x=0, y=.84, width=.5,height = 0.16)+
@@ -845,5 +606,5 @@ bull=ggdraw()+
 
 bull
   
-ggsave(plot=bull,filename="../out/Figures/Fig2BullTest2.png",width = 38, height = 40,units="in")
+#ggsave(plot=bull,filename="../Figures/Fig2BullTest2.png",width = 38, height = 40,units="in")
 ```
