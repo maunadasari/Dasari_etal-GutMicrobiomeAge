@@ -35,17 +35,19 @@ Given the heteroskedasticity in the data, we've decided that multiplying the var
 ### All Animals
 Pearson's R: 
 ```{r}
-PredTest1<-read_feather("../data/H.All_PredictedAgeData_Test1.feather") #corr age.years and mb = 0.6913309
-PredTest2<-read_feather("../data/H.All_PredictedAgeData_Test2.feather") #corr age.years and mb = 0.7007465
-PredTest3<-read_feather("../data/H.All_PredictedAgeData_Test3.feather") #corr age.years and mb = 0.7024963
-PredTest4<-read_feather("../data/H.All_PredictedAgeData_Test4.feather") #corr age.years and mb = 0.7029281
-PredTest5<-read_feather("../data/H.All_PredictedAgeData_Test5.feather") #corr age.years and mb = 0.6939718
+#Data derived in 2_ML_HetGaussianProcessRegression.ipynb
+#PredTest1<-read_feather("../data/H.All_PredictedAgeData_Test1.feather") #corr age.years and mb = 0.6913309
+#PredTest2<-read_feather("../data/H.All_PredictedAgeData_Test2.feather") #corr age.years and mb = 0.7007465
+#PredTest3<-read_feather("../data/H.All_PredictedAgeData_Test3.feather") #corr age.years and mb = 0.7024963
+#PredTest4<-read_feather("../data/H.All_PredictedAgeData_Test4.feather") #corr age.years and mb = 0.7029281
+#PredTest5<-read_feather("../data/H.All_PredictedAgeData_Test5.feather") #corr age.years and mb = 0.6939718
 
 H.PredLife<-rbind(PredTest1,PredTest2,PredTest3,PredTest4,PredTest5) %>% 
   rename(age_chrono=age.years)
 H.PredLife$delta<-H.PredLife$age_mb-H.PredLife$age_chrono
 H.PredLife$delta_abs<-abs(H.PredLife$age_mb-H.PredLife$age_chrono)
-saveRDS(H.PredLife,"../data/HetGPR.PredictedAgeData.rds")
+#saveRDS(H.PredLife,"../data/HetGPR.PredictedAgeData.rds")
+H.PredLife<-readRDS("../data/HetGPR.PredictedAgeData.rds")
 cor(x=H.PredLife$age_chrono,y=H.PredLife$age_mb,method="pearson") #0.6983195
 p.PredAge_Lifespan<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb,color=sex))+
   theme_minimal()+
