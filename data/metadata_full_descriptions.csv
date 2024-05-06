@@ -1,0 +1,84 @@
+ColumnID,DataType,Description
+DADA_id,chr,Sample ID.
+tid,int,Tissue ID - ID number for the original baboon fecal sample.
+did,int,DNA ID - ID number for the extracted DNA sample.
+plate,num,Plate ID for the DNA extraction plate.
+sname,chr,Animal ID - anonymized baboon identity ID.
+collection_date,date,Date of fecal sample collection.
+sex,chr,Animal's sex
+birth,date,Animal's birthdate.
+bstatus,num,Level of certainty around animal's birthdate.
+matured,Date,"Maturational milestone - Animal's date of sexual maturity (menarche for females, testicular enlargement for males)"
+status,int,Animal's status (live/dead)
+statdate,Date,Animal's last status date
+matgrp,num,Group ID of the animal's maternal group.
+age_chrono,num,Animal's chronological age on the date of collection. Calculated as collection_date - birth.
+collect_year,num,Year of fecal sample collection.
+collect_month,num,Month of fecal sample collection.
+season,chr,Season of fecal sample collection.
+matstate,factor,Maturation state of the animal at time of fecal sample collection. 
+collect_grp,factor,Group ID of the animal's group at the time of fecal sample collection. 
+collect_grpdensity,num,Total number of animals in the collect_grp.
+rain_1moprior,num,Total rain fall in the 1 month prior to fecal sample collection.
+rain_3moprior,num,Total rain fall in the 3 months prior to fecal sample collection.
+rain_6moprior,num,Total rain fall in the 6 months prior to fecal sample collection.
+rain_1yrprior,num,Total rain fall in the 1 year prior to fecal sample collection.
+read_count,num,Total read count of the sample after initial processing.
+richness,num,Alpha diversity metric - richness
+ShannonH,num,Alpha diversity metric - Shannon's H
+Simpson,num,Alpha diversity metric - Simpson's Diversity
+Hill.q1,num,Alpha diversity metric - Hill number 1
+Hill.q2,num,Alpha diversity metric - Hill number 2
+ordrank,int,Animal's ordinal rank.
+proprank,num,Animal's proportional rank.
+rnktype,chr,Type of animal rank (adult/juvenile)
+rain_1yrprior_mat,num,Total rain fall in the 1 year prior to animal's maturation date.
+mstatus,chr,Level of certainty around animal's maturation date.
+age_matured,num,Animal's chronological age at the time of maturity. Calculated as matured - birth.
+dispersed,Date,Maturational milestone - Date of animal's first dispersal.
+dispconfidence,int,Level of certainty around animal's dispersal date.
+age_dispersed,num,Animal's chronological age at the time of maturity. Calculated as dispersed - birth.
+ranked,Date,Maturational milestone - Date of animal's first adult rank in males.
+rstatus,chr,Level of certainty around animal's ranked date.
+age_ranked,num,Animal's chronological age at the time of adult rank attainment. Calculated as ranked - birth.
+date_first_preg,Date,Maturational milestone - Date of animal's first pregnancy.
+age_first_preg,num,Animal's chronological age at the time of first pregnancy. Calculated as date_first_preg - birth.
+parity,int,Female's parity.
+first_live_birth,date,Maturational milestone - Date of animal's first live birth.
+age_first_live_birth,num,Animal's chronological age at the time of first live birth. Calculated as first_live_birth - birth.
+rain_1yrprior_disp,num,Total rain fall in the 1 year prior to dispersal.
+rain_1yrprior_ranked,num,Total rain fall in the 1 year prior to adult rank attainment.
+rain_1yrprior_firstlivebirth,num,Total rain fall in the 1 year prior to first live birth.
+rain_1yrprior_firstpreg,num,Total rain fall in the 1 year prior to first pregnancy.
+mom_rank,int,Mother's rank.
+birth_matgrp_count,num,Total number of animals in the maternal group at the time of the animal's birth.
+grpdensity_adf,num,Total number of adult females at the time of fecal sample collection. (depreciated)
+adf_collect,num,Total number of adult females at the time of fecal sample collection.
+avg_month_maxtemp,num,Average max temperature the month prior to fecal sample collection. 
+sum_month_rain,num,Total amount of rain received the month of fecal sample collection.
+hydroyear,factor,The hydrological year at the time of fecal sample collection.
+maternal_loss,logic,Early life adversity metric - loss of mother before age 4
+sibling,logic,Early life adversity metric - loss of mother before age 4
+drought,logic,Early life adversity metric - loss of mother before age 4
+highGrpSize,logic,Early life adversity metric - loss of mother before age 4
+lowMatSCI,logic,Early life adversity metric - loss of mother before age 4
+lowMatRank,logic,Early life adversity metric - loss of mother before age 4
+cumulative_adversity,int,Early life adversity metric - loss of mother before age 4
+EA,logic,Early life adversity metric - total number of types of early life adversity experienced
+adm_mat,num,Total number of adult males at the time of maturation.
+adf_mat,num,Total number of adult females at the time of maturation.
+excess_cfemales_mat,num,The number of adult females in excess of the number of adult males at the time of maturation. Calculated as adf_mat - adm_mat.
+maternal_sisters_mat,num,Total number of maternal sisters at the time of maturation. 
+adf_firstpreg,num,Total number of adult females in the collection group at the time of first pregnancy.
+adf_firstlivebirth,num,Total number of adult females in the collection group at the time of first live birth.
+mompresent_mat,logic,Whether mom was present in the collection group at the time of maturation. 
+mompresent_lb,logic,Whether mom was present in the collection group at the time of first live birth. 
+mompresent_disp,logic,Whether mom was present in the collection group at the time of first dispersal. 
+mompresent_rank,logic,Whether mom was present in the collection group at the time of adult rank attainment. 
+genome_wide_anubis_ancestry,num,Hybridization score.
+age_stat,num,Age at the time of the last statdate available.
+rankedf,date,Maturational milestone - Date of animal's first adult rank in females.
+mompresent_rankedf,logic,Whether mom was present in the collection group at the time of adult female rank attainment. 
+rnktype_focal,chr,Adult rank classification (adult vs juvenile).
+avg_SCI_F,num,Average social connectedness to females over life.
+avg_SCI_M,num,Average social connectedness to males over life.
