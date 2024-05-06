@@ -1,0 +1,176 @@
+---
+title: "Heteroskedastic Gaussian Process Regressions"
+author: "Mauna Dasari"
+output:
+  html_document:
+    number_sections: no
+    theme: paper
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,warning=F,message=F,cache=2)
+library(feather);library(tidyverse);library(kableExtra);library(gridExtra);
+
+library(lme4);library(lmerTest);library(mgcv);library(survival);library(survminer);
+metadata_all<-readRDS("../data/metadata_full.rds") %>% 
+  rename(age_firstlivebirth=age_first_live_birth,
+         age_firstpreg=age_first_preg,
+         age_chrono=age.years) %>% 
+  mutate(age_stat=(statdate-birth)/365.25)
+```
+
+# Intro
+
+Given the heteroskedasticity in the data, we've decided that multiplying the variance by the gaussian process regression's kernel (rbf) is the most practical way to deal with it. This file uses a line to fit the relationship between predicted age and chronological age since it's easier to interpret. 
+
+
+# Evaluating the Model {.tabset .tabset-pills}
+## Plots {.tabset}
+### All Animals
+Pearson's R: 
+```{r}
+PredTest1<-read_feather("../data/H.All_PredictedAgeData_Test1.feather") #corr age.years and mb = 0.6913309
+PredTest2<-read_feather("../data/H.All_PredictedAgeData_Test2.feather") #corr age.years and mb = 0.7007465
+PredTest3<-read_feather("../data/H.All_PredictedAgeData_Test3.feather") #corr age.years and mb = 0.7024963
+PredTest4<-read_feather("../data/H.All_PredictedAgeData_Test4.feather") #corr age.years and mb = 0.7029281
+PredTest5<-read_feather("../data/H.All_PredictedAgeData_Test5.feather") #corr age.years and mb = 0.6939718
+
+H.PredLife<-rbind(PredTest1,PredTest2,PredTest3,PredTest4,PredTest5) %>% 
+  rename(age_chrono=age.years)
+H.PredLife$delta<-H.PredLife$age_mb-H.PredLife$age_chrono
+H.PredLife$delta_abs<-abs(H.PredLife$age_mb-H.PredLife$age_chrono)
+saveRDS(H.PredLife,"../data/HetGPR.PredictedAgeData.rds")
+cor(x=H.PredLife$age_chrono,y=H.PredLife$age_mb,method="pearson") #0.6983195
+p.PredAge_Lifespan<-ggplot(data=H.PredLife, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+
+     geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('female', 'male'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Microbial~Age~(age[m])))+
+  theme(plot.title = element_text(hjust=0.5,size=16),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank());p.PredAge_Lifespan
+
+#ggsave(plot=p.PredAge_Lifespan,filename="../out/PredAgeLinear_sex_yellowblue.tiff",dpi=200)
+
+fit<-lm(age_mb~age_chrono,data=H.PredLife)
+H.PredLife$resid<-resid(fit)
+fit2<-summary(fit)
+RMSE=sqrt(mean(H.PredLife$age_chrono-H.PredLife$resid_lm)^2)
+Adj.R_sq=fit2$r.sq
+Variance=(1-fit2$r.sq)
+PearsonsR=cor(x=H.PredLife$age_chrono,y=H.PredLife$age_mb,method="pearson")
+MedianErr=median(H.PredLife$delta_abs)
+SD=sd(H.PredLife$age_chrono)
+AvgAcceleration=mean(H.PredLife$delta)
+CV_chrono=raster::cv(H.PredLife$age_chrono)
+CV_mb=raster::cv(H.PredLife$age_mb)
+Aggregate8020_All<-c("13476","13476",RMSE,Adj.R_sq,Variance,SD,CV_chrono,CV_mb,PearsonsR,MedianErr,AvgAcceleration)
+```
+
+### Female Subset
+Pearson's R: 
+```{r}
+H.PredLife_F<-H.PredLife%>% filter(sex=="F")
+
+cor(x=H.PredLife_F$age_chrono,y=H.PredLife_F$age_mb,method="pearson")
+p.PredAge_Lifespan<-ggplot(data=H.PredLife_F, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+
+     geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('female', 'male'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Microbial~Age~(age[m])))+
+  labs(title="GPR (RBF*var(y)), Linear Fit")+
+  theme(plot.title = element_text(hjust=0.5,size=16),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank());p.PredAge_Lifespan
+
+fit<-lm(age_mb~age_chrono,data=H.PredLife_F)
+H.PredLife_F$resid<-resid(fit)
+fit2<-summary(fit)
+RMSE=sqrt(mean(H.PredLife_F$age_chrono-H.PredLife_F$resid_lm)^2)
+Adj.R_sq=fit2$r.sq
+Variance=(1-fit2$r.sq)
+PearsonsR=cor(x=H.PredLife_F$age_chrono,y=H.PredLife_F$age_mb,method="pearson")
+MedianErr=median(H.PredLife_F$delta_abs)
+SD=sd(H.PredLife_F$age_chrono)
+AvgAcceleration=mean(H.PredLife_F$delta)
+CV_chrono=raster::cv(H.PredLife_F$age_chrono)
+CV_mb=raster::cv(H.PredLife_F$age_mb)
+Aggregate8020_F<-c("8245","8245",RMSE,Adj.R_sq,Variance,SD,CV_chrono,CV_mb,PearsonsR,MedianErr,AvgAcceleration)
+```
+
+### Male Subset
+Pearson's R: 
+```{r}
+H.PredLife_M<-H.PredLife %>% filter(sex=="M")
+
+cor(x=H.PredLife_M$age_chrono,y=H.PredLife_M$age_mb,method="pearson")
+p.PredAge_Lifespan<-ggplot(data=H.PredLife_M, aes(x=age_chrono,y=age_mb,color=sex))+
+  theme_minimal()+
+  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
+  geom_point(pch=21,alpha=0.5)+
+     geom_smooth(method=lm, fill=NA,fullrange = F,size=1.5)+
+  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('male', 'female'))+
+  xlim(0,30)+ylim(0,30)+
+  xlab(bquote(Chronological~Age~(age[c])))+
+  ylab(bquote(Microbial~Age~(age[m])))+
+  labs(title="GPR (RBF*var(y)), Linear Fit")+
+  theme(plot.title = element_text(hjust=0.5,size=16),
+        aspect.ratio=1,
+        legend.position = c(.2,.85), 
+        legend.title=element_blank());p.PredAge_Lifespan
+
+fit<-lm(age_mb~age_chrono,data=H.PredLife_M)
+H.PredLife_M$resid<-resid(fit)
+fit2<-summary(fit)
+RMSE=sqrt(mean(H.PredLife_M$age_chrono-H.PredLife_M$resid_lm)^2)
+Adj.R_sq=fit2$r.sq
+Variance=(1-fit2$r.sq)
+PearsonsR=cor(x=H.PredLife_M$age_chrono,y=H.PredLife_M$age_mb,method="pearson")
+MedianErr=median(H.PredLife_M$delta_abs)
+SD=sd(H.PredLife_M$age_chrono)
+AvgAcceleration=mean(H.PredLife_M$delta)
+CV_chrono=raster::cv(H.PredLife_M$age_chrono)
+CV_mb=raster::cv(H.PredLife_M$age_mb)
+Aggregate8020_M<-c("5231","5231",RMSE,Adj.R_sq,Variance,SD,CV_chrono,CV_mb,PearsonsR,MedianErr,AvgAcceleration)
+```
+
+## Summary Statistics
+```{r}
+Sum8020<-as.data.frame(rbind(Aggregate8020_All,Aggregate8020_F,Aggregate8020_M))
+colnames(Sum8020)<-c("n_training","n_test","RMSE","Adj.R_sq","Variance","SD","CV_chrono","CV_mb","PearsonsR","MedianErr","AvgAcceleration")
+Sum8020<-Sum8020 %>% 
+  mutate_if(is.factor,as.character) %>% 
+  mutate_if(is.character, as.numeric) %>% 
+  mutate(Model=c("All Animals","Female Subset","Male Subset"))
+Sum8020<-Sum8020[,c(12,1:11)]
+#nice green #517C63
+Sum8020%>% 
+  kable(digits = 3,format = 'html', escape = F) %>%
+  kable_styling() %>% 
+  kable_styling(fixed_thead = T) 
+
+# Sex interaction 
+summary(lm(age_mb ~ age_chrono + sex + age_chrono:sex,data=H.PredLife))
+
+# Which sex ages faster? 
+summary(lm(age_mb ~ age_chrono,data=H.PredLife[H.PredLife$sex=="F",]))
+
+summary(lm(age_mb ~ age_chrono,data=H.PredLife[H.PredLife$sex=="M",]))
+```
+
