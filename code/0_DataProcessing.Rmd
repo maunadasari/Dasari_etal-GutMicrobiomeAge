@@ -297,4 +297,85 @@ phenotypes_scaled_samplecols<-apply(phenotypes,1,function(x){log(x)/gm_mean(x)})
 phenotypes_scaled<-as.data.frame(t(phenotypes_scaled_samplecols))
 saveRDS(phenotypes_scaled, '../data/phenotypes_CLRscaled_no_chl_mt.rds')
 ```
+
+# Data for ML Algorithms
+RF and Gaussian process models were run in Python. To have readable data in both R and Python, I used the feather package.
+```{r}
+metadata_all<-readRDS("../data/metadata_full.rds")
+#Filter out those with only one sample in the time frame.
+##Figure out who those individuals are
+metadata_filtered_no_singletons_lifespan<-metadata_all %>% 
+  group_by(sname,sex,fake_sex) %>% 
+  summarize(count=n_distinct(DADA_id)) %>% #479 individuals
+  ungroup() %>% 
+  filter(count>1) #431 individuals
+##Filter out individuals not on the list
+n_test=5 #5 for 80:20 split
+info<-metadata_all %>% 
+  select("DADA_id","sname","age.years","sex","fake_sex") %>%
+  filter(sname %in% metadata_filtered_no_singletons_lifespan$sname) %>%
+  group_by(sname) %>% 
+  mutate(count=n(),
+         testID=ifelse(count>n_test,
+                       sample(1:n_test,size=count,replace=T),
+                       sample(1:n_test,size=count,replace=F))) %>% 
+  ungroup()
+saveRDS(info,"../data/metadata_filtered_8020.rds")
+
+
+metadata<-readRDS("../data/metadata_filtered_8020.rds")
+meta<-metadata %>% select(DADA_id,sname,age.years, sex, testID) %>% arrange(DADA_id)
+feather::write_feather(meta,"../data/metadata_filtered_8020_arranged.feather")
+
+phenotypes<-readRDS("../data/phenotypes_CLRscaled_no_chl_mt.rds")
+features<-phenotypes %>% 
+  rownames_to_column("DADA_id") %>% 
+  as.tibble() %>% 
+  filter(.[['DADA_id']] %in% meta$DADA_id) %>% 
+  arrange(.[['DADA_id']]) %>% distinct()
+feather::write_feather(features,"../data/Features_arranged.feather")
+
+library(feather)
+
+phenotypes<-readRDS("../data/phenotypes_CLRscaled_no_chl_mt.rds")
+#info<-readRDS("../../raw_data/metadata_filtered_8020.rds");n=5;folder="NestedCV8020";
+info<-readRDS("../data/metadata_filtered_8020.rds") %>% 
+  select(-fake_sex,-count)
+
+for(i in 1:max(info$testID)){
+
+#Filter the test and training data
+train_info<-info %>% 
+  filter(testID!=i) %>% 
+  arrange(.[['DADA_id']])
+
+test_info<-info %>% 
+  filter(testID==i) %>% 
+  arrange(.[['DADA_id']])
+
+#Create features tables for both training and test data
+train_count<-phenotypes %>% 
+  rownames_to_column("DADA_id") %>% 
+  as.tibble() %>% 
+  filter(.[['DADA_id']] %in% train_info$DADA_id) %>% 
+  arrange(.[['DADA_id']]) %>% 
+  column_to_rownames("DADA_id")
+
+test_count<-phenotypes %>% 
+  rownames_to_column("DADA_id") %>% 
+  as.tibble() %>% 
+  filter(.[['DADA_id']] %in% test_info$DADA_id) %>% 
+  arrange(.[['DADA_id']]) %>% 
+  column_to_rownames("DADA_id") 
+
+
+name_train_info<-paste("../data/metadata_Train",i,"_all.feather", sep="")
+write_feather(train_info,name_train_info)
+name_test_info<-paste("../data/metadata_Test",i,"_all.feather", sep="")
+write_feather(test_info,name_test_info)
+name_train_features<-paste("../data/features_Train",i,"_all.feather", sep="")
+write_feather(train_count,name_train_features)
+name_test_features<-paste("../data/features_Test",i,"_all.feather", sep="")
+write_feather(test_count,name_test_features)
+}
 ```

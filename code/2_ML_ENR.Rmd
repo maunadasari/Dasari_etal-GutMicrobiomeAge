@@ -16,11 +16,9 @@ knitr::opts_chunk$set(echo = F,warning=F,message=F,cache=2)
 
 library(glmnet);library(tidyverse);library(survival);library(survminer); library(dplyr);library(rlang);library(ggplot2);library(lmerTest);library(gridExtra); library(kableExtra)
 
-#phenotypes<-readRDS('../out/phenotypes_CLRscaled_no_chl_mt.rds')
-metadata_all<-readRDS("../out/metadata_bstatus0_mathormonerank_rainpriortomilestone_matrankbirthgroup.rds") %>% 
+metadata_all<-readRDS("../data/metadata_full") %>% 
   rename(age_firstlivebirth=age_first_live_birth,
          age_firstpreg=age_first_preg)
-metadata_random<-readRDS("../out/metadata_random.rds")
 
 theme2<-theme(plot.background = element_blank(), 
   panel.grid.major = element_blank(), 
@@ -35,77 +33,12 @@ theme2<-theme(plot.background = element_blank(),
   plot.title=element_text(hjust=0.5, size=12))
 ```
 
-# Data Generation {.tabset}
-
+# ENR {.tabset}
 Here is the code for the finalized elastic net regressions. After some optimizing for the 80:20 model, I settled on the following parameters:
 * alpha = 0.2 (closer to a ridge regression)
 * nfolds = 75
 * data from entire lifespan
-
-## ENRs {.tabset}
-### Nested Cross Validation 80:20 with Samples {.tabset .tabset-pills}
-
-#### Make the data
-```{r eval=F, echo=T}
-metadata_random<-readRDS("../out/metadata_random.rds")
-
-#%%%%%%%%%%%%%%%#
-#  INDIVIDUALS  #
-#%%%%%%%%%%%%%%%#
-n_test=5 #5 for 80:20 split
-#Filter out those with only one sample in the time frame.
-##Figure out who those individuals are
-metadata_filtered_no_singletons_lifespan<-metadata_random %>% 
-  group_by(sname,sex,fake_sex) %>% 
-  summarize(count=n_distinct(DADA_id)) %>% #479 individuals
-  ungroup() %>% 
-  filter(count>1) %>%  #431 individuals
-  mutate(testID=sample(1:n_test,size=431,replace=T)) %>%  #hard coded 431 so I wouldn't have to create a new table
-  ungroup()
-##Filter out individuals not on the list
-info<-metadata_random %>% 
-  select("DADA_id","sname","age.years","sex","fake_sex") %>%
-  filter(sname %in% metadata_filtered_no_singletons_lifespan$sname) %>%
-  left_join(metadata_filtered_no_singletons_lifespan, by=c("sname","sex","fake_sex"))
-saveRDS(info,"../out/ENR_Final/metadata_filtered_8020individuals.rds")
-
-#%%%%%%%%%%%#
-#  SAMPLES  #
-#%%%%%%%%%%%#
-
-#Filter out those with only one sample in the time frame.
-##Figure out who those individuals are
-metadata_filtered_no_singletons_lifespan<-metadata_random %>% 
-  group_by(sname,sex,fake_sex) %>% 
-  summarize(count=n_distinct(DADA_id)) %>% #479 individuals
-  ungroup() %>% 
-  filter(count>1) #431 individuals
-##Filter out individuals not on the list
-n_test=5 #5 for 80:20 split
-info<-metadata_random %>% 
-  select("DADA_id","sname","age.years","sex","fake_sex") %>%
-  filter(sname %in% metadata_filtered_no_singletons_lifespan$sname) %>%
-  group_by(sname) %>% 
-  mutate(count=n(),
-         testID=ifelse(count>n_test,
-                       sample(1:n_test,size=count,replace=T),
-                       sample(1:n_test,size=count,replace=F))) %>% 
-  ungroup()
-saveRDS(info,"../out/ENR_Final/metadata_filtered_8020.rds")
-```
-
-```{r}
-info<-readRDS("../out/ENR_Final/metadata_filtered_8020individuals.rds") %>% 
-  group_by(sname,testID) %>% 
-  summarize() %>% 
-  ungroup()
-
-hist(info$testID)
-```
-
-#### ENR
-
-This ENR is written so I can easily switch between a randomization at the sample level or the individual level.
+This work was done on an HPCC, so this code is written as that individual script would be.
 ```{r eval=F, echo=T}
 library(glmnet)
 library(tibble)
@@ -114,9 +47,9 @@ library(rlang)
 library(doParallel)
 registerDoParallel(16)
 
-phenotypes<-readRDS("../../raw_data/phenotypes_CLRscaled_no_chl_mt.rds")
+phenotypes<-readRDS("../data/phenotypes_CLRscaled_no_chl_mt.rds")
 #info<-readRDS("../../raw_data/metadata_filtered_8020.rds");n=5;folder="NestedCV8020";
-info<-readRDS("../../raw_data/metadata_filtered_8020individuals.rds");n=5;folder="NestedCV8020Individuals";
+info<-readRDS("../data/metadata_filtered_8020.rds");n=5;folder="NestedCV8020Individuals";
 # creating the extra tables we need #
 SummaryStats_list<-c("sname","n_Training","n_Test","Intercept",
                           "MSE","RMSE","RSE","R_sq","Adj.R_sq",
@@ -172,7 +105,7 @@ PredictedAge<-predict(model,
 #Pull weights
 weights<-as.data.frame(coef(model,s=model$lambda.min)[,1])
 rownames(weights)<-c("Intercept",colnames(phenotypes))
-name_weights<-paste("../../out/ENR_Final/", folder, "/Weights75_Test",i,".rds",sep = "")
+name_weights<-paste("../out/ENR_Final/", folder, "/Weights75_Test",i,".rds",sep = "")
 saveRDS(weights,name_weights)
 
 #Pull test predictions
@@ -187,7 +120,7 @@ colnames(PredictedAgeData)<-c("age_chrono","age_mb","delta","delta_abs","DADA_id
 PredictedAgeData<-rbind(PredictedAgeData,test_info_postmodel)
 PredictedAgeData = PredictedAgeData[-1,]
 PredictedAgeData<-PredictedAgeData[,c(5,1:4)]
-name_predict<-paste("../../out/ENR_Final/", folder, "/PredictedAgeData75_Test",i,".rds", sep="")
+name_predict<-paste("../out/ENR_Final/", folder, "/PredictedAgeData75_Test",i,".rds", sep="")
 saveRDS(PredictedAgeData,name_predict)
 
 #Take summary metrics
@@ -214,13 +147,13 @@ name_summary<-paste("../../out/ENR_Final/", folder, "/SummaryStats75.rds", sep="
 saveRDS(SummaryStats,name_summary)
 ```
 
-# Comparing the types of nested cross validations {.tabset .tabset-pills}
-This section shows the plots I used to compare the types of nested cross-validation (80:20 at the sample level, 80:20 at the individual level, and focal individual as test)
 
-## 80:20 Sample Nested CV {.tabset}
+
+# 80:20 Sample Nested CV {.tabset}
 Number above the graphs corresponds to Pearson's R between the predicted age and chronological age.
 ```{r}
-PredTest1<-readRDS("../out/ENR_Final/NestedCV8020Samples/Lifespan/PredictedAgeData75_Test1.rds");PredTest1$Test_Set<-"Test1"
+#outputs from the above HPCC code
+PredTest1<-readRDS("../out/ENR_Final/NestedCV8020Samples/Lifespan/PredictedAgeData75_Test1.rds");PredTest1$Test_Set<-"Test1" 
 PredTest2<-readRDS("../out/ENR_Final/NestedCV8020Samples/Lifespan/PredictedAgeData75_Test2.rds");PredTest2$Test_Set<-"Test2"
 PredTest3<-readRDS("../out/ENR_Final/NestedCV8020Samples/Lifespan/PredictedAgeData75_Test3.rds");PredTest3$Test_Set<-"Test3"
 PredTest4<-readRDS("../out/ENR_Final/NestedCV8020Samples/Lifespan/PredictedAgeData75_Test4.rds");PredTest4$Test_Set<-"Test4"
@@ -298,66 +231,3 @@ m.lifespan<-summary(lm(data=PredLife,age_mb~age_chrono+sex+sex*age_chrono))
 Lifespan.estimates<-m.lifespan$coefficients[,1];Lifespan.se<-m.lifespan$coefficients[,2];Lifespan.pvalue<-m.lifespan$coefficients[,4];
 m.lifespan;Lifespan.estimates;Lifespan.se
 ```
-
-## 80:20 Individual Nested CV {.tabset}
-Number above the graphs corresponds to Pearson's R between the predicted age and chronological age.
-```{r}
-PredTest1<-readRDS("../out/ENR_Final/NestedCV8020Individuals/PredictedAgeData75_Test1.rds");PredTest1$Test_Set<-"Test1"
-PredTest2<-readRDS("../out/ENR_Final/NestedCV8020Individuals/PredictedAgeData75_Test2.rds");PredTest2$Test_Set<-"Test2"
-PredTest3<-readRDS("../out/ENR_Final/NestedCV8020Individuals/PredictedAgeData75_Test3.rds");PredTest3$Test_Set<-"Test3"
-PredTest4<-readRDS("../out/ENR_Final/NestedCV8020Individuals/PredictedAgeData75_Test4.rds");PredTest4$Test_Set<-"Test4"
-PredTest5<-readRDS("../out/ENR_Final/NestedCV8020Individuals/PredictedAgeData75_Test5.rds");PredTest5$Test_Set<-"Test5"
-
-metadata_min<-metadata_random %>% select("DADA_id","sname","sex","fake_sex")
-PredLife_Individuals<-rbind(PredTest1,PredTest2,PredTest3,PredTest4,PredTest5) %>% left_join(metadata_min,by="DADA_id")
-
-cor(x=PredLife_Individuals$age_chrono,y=PredLife_Individuals$age_mb,method="pearson")
-p.PredAge_Lifespan_Individuals<-ggplot(data=PredLife_Individuals, aes(x=age_chrono,y=age_mb,color=sex))+
-  theme_minimal()+
-  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
-  geom_point(pch=21,alpha=0.5)+
-     geom_smooth(method=lm, fill=NA,fullrange = T)+
-  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('female', 'male'))+
-  xlim(0,30)+ylim(0,30)+
-  xlab(bquote(Chronological~Age~(age[c])))+
-  ylab(bquote(Microbial~Age~(age[m])))+
-  labs(title="All Lifespan (n=13,476)")+
-  theme(plot.title = element_text(hjust=0.5,size=12),
-        aspect.ratio=1,
-        legend.position = c(.2,.85), 
-        legend.title=element_blank());p.PredAge_Lifespan_Individuals
-#(plot=p.PredAge_Lifespan_Individuals,filename="../out/plot/Indiv8020_PredAgePlot_sex.tiff", 
-#       dpi=200,width=7,height=7)
-
-p.PredAge_Lifespan.natural_Individuals<-ggplot(data=PredLife_Individuals, aes(x=age_chrono,y=age_mb,color=sex))+
-  theme_minimal()+
-  geom_abline(intercept = 0, slope = 1, linetype=2,colour="grey")+
-  geom_point(pch=21,alpha=0.5)+
-     geom_smooth(method=lm, fill=NA,fullrange = T)+
-  scale_color_manual(name = 'sex',values = c('M' = '#115163','F' = 'darkgoldenrod3'),labels = c('female', 'male'))+
-  labs(title="All Lifespan (n=13,476)")+
-  xlab(bquote(Chronological~Age~(age[c])))+
-  ylab(bquote(Microbial~Age~(age[m])))+
-  theme(plot.title = element_text(hjust=0.5,size=12),
-        aspect.ratio=1,
-        legend.position = "none", 
-        legend.title=element_blank());p.PredAge_Lifespan.natural_Individuals
-
-fit<-summary(lm(PredLife_Individuals$age_mb~PredLife_Individuals$age_chrono))
-Intercept=fit$coefficients[1,1]
-MSE=mean((PredLife_Individuals$age_chrono-residuals(fit))^2)
-RMSE=(sqrt(mean(PredLife_Individuals$age_chrono-residuals(fit))^2))
-RSE=fit$sigma
-R_sq=fit$r.squared
-Adj.R_sq=fit$adj.r.squared
-R_sq_1to1=1 - (with( PredLife_Individuals,sum( age_mb-age_chrono)^2 ))/with(PredLife_Individuals, sum( age_mb^2))
-Variance=(1-fit$r.squared)
-t_ratio=(fit$coefficients[2,1]-1)/fit$coefficients[2,2]
-SD=sd(PredLife_Individuals$age_chrono)
-PearsonsR=cor(x=PredLife_Individuals$age_chrono,y=PredLife_Individuals$age_mb,
-                            method="pearson")
-MedianErr=median(PredLife_Individuals$delta_abs)
-AvgAcceleration=mean(PredLife_Individuals$delta)
-Aggregate8020_Lifespan_Individuals<-c("13456","13456",Intercept,MSE,RMSE,RSE,R_sq,Adj.R_sq,R_sq_1to1,Variance,t_ratio,SD,PearsonsR,MedianErr,AvgAcceleration)
-```
-
